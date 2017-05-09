@@ -1,0 +1,7 @@
+# Jitsi Videobridge settings
+JVB_HOSTNAME=example.com
+JVB_HOST=
+JVB_PORT=5347
+JVB_SECRET=fO@OAfyH
+JVB_OPTS=""
+

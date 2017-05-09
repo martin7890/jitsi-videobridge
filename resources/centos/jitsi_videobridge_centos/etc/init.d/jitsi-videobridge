@@ -1,0 +1,132 @@
+#! /bin/sh
+#
+# INIT script for Jitsi Videobridge
+# Version: 1.0  01-May-2014  yasen@bluejimp.com
+#
+### BEGIN INIT INFO
+# Provides:          jitsi-videobridge
+# Required-Start:    $local_fs $remote_fs
+# Required-Stop:     $local_fs $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Jitsi Videobridge
+# Description:       WebRTC compatible Selective Forwarding Unit (SFU)
+### END INIT INFO
+
+. /etc/init.d/functions
+
+# Include videobridge defaults if available
+if [ -f /etc/jitsi/videobridge/config ]; then
+    . /etc/jitsi/videobridge/config
+fi
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+DAEMON=/usr/share/jitsi-videobridge/jvb.sh
+NAME=jvb
+USER=jvb
+PIDPATH=/var/run/jitsi
+PIDFILE="$PIDPATH"/jitsi-videobridge.pid
+LOGPATH=/var/log/jitsi
+LOGFILE=/var/log/jitsi/jvb.log
+DESC=jitsi-videobridge
+if [ ! $JVB_HOST ]; then
+    JVB_HOST=localhost
+fi
+
+if [ ! $JVB_PORT ]; then
+    JVB_PORT=5347
+fi
+
+DAEMON_OPTS=" --host=$JVB_HOST --domain=$JVB_HOSTNAME --port=$JVB_PORT --secret=$JVB_SECRET  $JVB_OPTS &"
+
+test -x $DAEMON || exit 0
+
+set -e
+
+if [ ! -d "$PIDPATH" ]; then
+    mkdir "$PIDPATH";
+    chown jvb:jitsi "$PIDPATH";
+    chmod 775 "$PIDPATH"
+fi
+
+if [ -d "$LOGPATH" ]; then
+    rm -rf "$LOGFILE".*.lck
+    rm -rf "$LOGFILE".[0-9].*
+fi
+
+stop() {
+    if [ -f $PIDFILE ]; then
+        PID=$(cat $PIDFILE)
+    fi
+    echo -n "Stopping $NAME: "
+    if [ $PID ]; then
+        kill $PID || true
+        rm $PIDFILE || true
+        echo "$NAME stopped."
+    else
+        echo "$NAME doesn't seem to be running."
+    fi
+}
+
+start() {
+    if [ -f $PIDFILE ]; then
+        echo "$NAME seems to be already running, we found pidfile $PIDFILE."
+        exit 1
+    fi
+    echo -n "Starting $NAME: "
+    if daemon --pidfile $PIDFILE --user $USER $DAEMON $DAEMON_OPTS; then
+        echo 0
+    else
+        echo 1
+    fi
+    sleep .5
+    PID_VALUE=$(ps -eo pid,command | grep '/usr/share/jitsi-videobridge' | grep -v grep | awk '{print $1}')
+    if [ $PID_VALUE ]; then
+       su - $USER -c "echo $PID_VALUE" > $PIDFILE
+    fi
+}
+
+status() {
+    printf "%-50s" "Checking $NAME..."
+    if [ -f $PIDFILE ]; then
+        PID=`cat $PIDFILE`
+        if [ -z "`ps axf | grep ${PID} | grep -v grep`" ]; then
+            printf "%s\n" "Process dead but pidfile exists"
+        else
+            echo "Running"
+        fi
+    else
+        printf "%s\n" "Service not running"
+    fi
+}
+
+case "$1" in
+  start)
+    start
+  ;;
+  stop)
+    stop
+  ;;
+  restart)
+    stop
+    start
+  ;;
+  forcereload)
+    echo "Force stop/start jitsi-videobridge" "jitsi-videobridge"
+    stop
+    if [ -f $PIDFILE ]; then
+      rm -f $PIDFILE
+    fi
+    start
+  ;;
+  status)
+    status
+  ;;
+  *)
+    N=/etc/init.d/$NAME
+    echo "Usage: $N {start|stop|restart|forcereload|status}" >&2
+    exit 1
+  ;;
+esac
+
+exit 0

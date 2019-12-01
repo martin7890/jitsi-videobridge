@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,15 @@ package org.jitsi.videobridge.xmpp;
 
 import java.util.*;
 
-import net.java.sip.communicator.impl.protocol.jabber.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-
-import org.jitsi.service.version.*;
-import org.jitsi.videobridge.*;
-import org.jitsi.videobridge.osgi.*;
-import org.jivesoftware.smack.packet.*;
+import org.jitsi.meet.*;
+import org.jitsi.osgi.*;
+import org.jitsi.service.configuration.*;
+import org.jitsi.utils.logging2.*;
+import org.jitsi.videobridge.Videobridge;
+import org.jitsi.xmpp.component.*;
+import org.jitsi.xmpp.util.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
 import org.osgi.framework.*;
 import org.xmpp.component.*;
 import org.xmpp.packet.*;
@@ -32,16 +34,22 @@ import org.xmpp.packet.Packet;
 
 /**
  * Implements <tt>org.xmpp.component.Component</tt> to provide Jitsi Videobridge
- * as an internal Jabber component.
+ * as a Jabber component.
  *
  * @author Lyubomir Marinov
+ * @author Pawel Domas
+ * @author Boris Grozev
  */
 public class ComponentImpl
-    extends AbstractComponent
+    extends ComponentBase
     implements BundleActivator
 {
-    private static final org.jitsi.util.Logger logger
-            =  org.jitsi.util.Logger.getLogger(ComponentImpl.class);
+    /**
+     * The {@link Logger} used by the {@link ComponentImpl} class and its
+     * instances for logging output.
+     */
+    private static final Logger logger
+            =  new LoggerImpl(ComponentImpl.class.getName());
 
     /**
      * The (default) description of <tt>ComponentImpl</tt> instances.
@@ -77,36 +85,31 @@ public class ComponentImpl
     }
 
     /**
-     * Logs a specific <tt>String</tt> at debug level.
-     *
-     * @param s the <tt>String</tt> to log at debug level
+     * The {@link XmppCommon} instance which implements handling of Smack IQs
+     * for this {@link ComponentImpl}.
      */
-    private static void logd(String s)
-    {
-        logger.info(s);
-    }
-
-    /**
-     * Logs a specific <tt>Throwable</tt> at error level.
-     *
-     * @param t the <tt>Throwable</tt> to log at error level
-     */
-    private static void loge(Throwable t)
-    {
-        t.printStackTrace(System.err);
-    }
-
-    /**
-     * The <tt>BundleContext</tt> in which this instance has been started as an
-     * OSGi bundle.
-     */
-    private BundleContext bundleContext;
+    private final XmppCommon common = new XmppCommon();
 
     /**
      * Initializes a new <tt>ComponentImpl</tt> instance.
+     * @param host the hostname or IP address to which this component will be
+     *             connected.
+     * @param port the port of XMPP server to which this component will connect.
+     * @param domain the name of main XMPP domain on which this component will
+     *               be served.
+     * @param subDomain the name of subdomain on which this component will be
+     *                  available.
+     * @param secret the password used by the component to authenticate with
+     *               XMPP server.
      */
-    public ComponentImpl()
+    public ComponentImpl(
+        String host,
+        int port,
+        String domain,
+        String subDomain,
+        String secret)
     {
+        super(host, port, domain, subDomain, secret);
     }
 
     /**
@@ -118,20 +121,7 @@ public class ComponentImpl
     @Override
     protected String[] discoInfoFeatureNamespaces()
     {
-        return
-            new String[]
-                    {
-                        ColibriConferenceIQ.NAMESPACE,
-                        ProtocolProviderServiceJabberImpl
-                            .URN_XMPP_JINGLE_DTLS_SRTP,
-                        ProtocolProviderServiceJabberImpl
-                            .URN_XMPP_JINGLE_ICE_UDP_1,
-                        ProtocolProviderServiceJabberImpl
-                            .URN_XMPP_JINGLE_RAW_UDP_0,
-                        // TODO this should be a constant in
-                        // ProtocolProviderServiceJabberImpl.
-                        "jabber:iq:version"
-                    };
+        return XmppCommon.FEATURES.clone();
     }
 
     /**
@@ -144,18 +134,6 @@ public class ComponentImpl
     protected String discoInfoIdentityCategoryType()
     {
         return "conference";
-    }
-
-    /**
-     * Gets the OSGi <tt>BundleContext</tt> in which this Jabber component is
-     * executing.
-     *
-     * @return the OSGi <tt>BundleContext</tt> in which this Jabber component is
-     * executing
-     */
-    public BundleContext getBundleContext()
-    {
-        return bundleContext;
     }
 
     /**
@@ -182,91 +160,15 @@ public class ComponentImpl
         return NAME;
     }
 
-    private Videobridge getVideobridge()
-    {
-        BundleContext bundleContext = getBundleContext();
-        Videobridge videobridge;
-
-        if (bundleContext == null)
-        {
-            videobridge = null;
-        }
-        else
-        {
-            videobridge
-                = ServiceUtils2.getService(bundleContext, Videobridge.class);
-        }
-        return videobridge;
-    }
-
     /**
-     * Returns the <tt>VersionService</tt> used by this
-     * <tt>Videobridge</tt>.
+     * Returns the {@link Videobridge} instance that is managing conferences
+     * for this component. Returns <tt>null</tt> if no instance is running.
      *
-     * @return the <tt>VersionService</tt> used by this
-     * <tt>Videobridge</tt>.
+     * @return the videobridge instance, <tt>null</tt> when none is running.
      */
-    public VersionService getVersionService()
+    public Videobridge getVideobridge()
     {
-        BundleContext bundleContext = getBundleContext();
-
-        if (bundleContext != null)
-        {
-            return ServiceUtils2.getService(bundleContext,
-                VersionService.class);
-        }
-
-        return null;
-    }
-
-    /**
-     * Handles a <tt>ColibriConferenceIQ</tt> stanza which represents a request.
-     *
-     * @param conferenceIQ the <tt>ColibriConferenceIQ</tt> stanza represents
-     * the request to handle
-     * @return an <tt>org.jivesoftware.smack.packet.IQ</tt> stanza which
-     * represents the response to the specified request or <tt>null</tt> to
-     * reply with <tt>feature-not-implemented</tt>
-     * @throws Exception to reply with <tt>internal-server-error</tt> to the
-     * specified request
-     */
-    private org.jivesoftware.smack.packet.IQ handleColibriConferenceIQ(
-            ColibriConferenceIQ conferenceIQ)
-        throws Exception
-    {
-        Videobridge videobridge = getVideobridge();
-        org.jivesoftware.smack.packet.IQ iq;
-
-        if (videobridge == null)
-            iq = null;
-        else
-            iq = videobridge.handleColibriConferenceIQ(conferenceIQ);
-        return iq;
-    }
-
-    /**
-     * Handles a <tt>GracefulShutdownIQ</tt> stanza which represents a request.
-     *
-     * @param shutdownIQ the <tt>GracefulShutdownIQ</tt> stanza represents
-     * the request to handle
-     * @return an <tt>org.jivesoftware.smack.packet.IQ</tt> stanza which
-     * represents the response to the specified request or <tt>null</tt> to
-     * reply with <tt>feature-not-implemented</tt>
-     * @throws Exception to reply with <tt>internal-server-error</tt> to the
-     * specified request
-     */
-    private org.jivesoftware.smack.packet.IQ handleGracefulShutdownIQ(
-            GracefulShutdownIQ shutdownIQ)
-        throws Exception
-    {
-        Videobridge videobridge = getVideobridge();
-        org.jivesoftware.smack.packet.IQ iq;
-
-        if (videobridge == null)
-            iq = null;
-        else
-            iq = videobridge.handleGracefulShutdownIQ(shutdownIQ);
-        return iq;
+        return common.getVideobridge();
     }
 
     /**
@@ -274,7 +176,7 @@ public class ComponentImpl
      * <tt>set</tt> which represents a request. Converts the specified
      * <tt>org.xmpp.packet.IQ</tt> to an
      * <tt>org.jivesoftware.smack.packet.IQ</tt> stanza, handles the Smack
-     * stanza via a call to {@link #handleIQ(org.jivesoftware.smack.packet.IQ)},
+     * stanza via a call to {@link XmppCommon#handleIQ},
      * converts the result Smack stanza to an <tt>org.xmpp.packet.iQ</tt> which
      * is returned as the response to the request.
      *
@@ -291,10 +193,30 @@ public class ComponentImpl
     {
         try
         {
-            logd("RECV: " + iq.toXML());
-
             org.jivesoftware.smack.packet.IQ smackIQ = IQUtils.convert(iq);
-            org.jivesoftware.smack.packet.IQ resultSmackIQ = handleIQ(smackIQ);
+            // Failed to convert to Smack IQ ?
+            if (smackIQ == null)
+            {
+                if (iq.isRequest())
+                {
+                    IQ error = new IQ(IQ.Type.error, iq.getID());
+                    error.setFrom(iq.getTo());
+                    error.setTo(iq.getFrom());
+                    error.setError(
+                            new PacketError(
+                                    PacketError.Condition.bad_request,
+                                    PacketError.Type.modify,
+                                    "Failed to parse incoming stanza"));
+                    return error;
+                }
+                else
+                {
+                    logger.error("Failed to convert stanza: " + iq.toXML());
+                }
+            }
+
+            org.jivesoftware.smack.packet.IQ resultSmackIQ
+                = common.handleIQ(smackIQ);
             IQ resultIQ;
 
             if (resultSmackIQ == null)
@@ -304,66 +226,25 @@ public class ComponentImpl
             else
             {
                 resultIQ = IQUtils.convert(resultSmackIQ);
-
-                logd("SENT: " + resultIQ.toXML());
             }
 
             return resultIQ;
         }
         catch (Exception e)
         {
-            loge(e);
+            logger.error(
+                "Failed to handle IQ with id="
+                    + (iq == null ? "null" : iq.getID()),
+                e);
+
             throw e;
         }
     }
 
-    /**
-     * Handles an <tt>org.jivesoftware.smack.packet.IQ</tt> stanza of type
-     * <tt>get</tt> or <tt>set</tt> which represents a request.
-     *
-     * @param iq the <tt>org.jivesoftware.smack.packet.IQ</tt> stanza of type
-     * <tt>get</tt> or <tt>set</tt> which represents the request to handle
-     * @return an <tt>org.jivesoftware.smack.packet.IQ</tt> stanza which
-     * represents the response to the specified request or <tt>null</tt> to
-     * reply with <tt>feature-not-implemented</tt>
-     * @throws Exception to reply with <tt>internal-server-error</tt> to the
-     * specified request
-     */
-    private org.jivesoftware.smack.packet.IQ handleIQ(
-            org.jivesoftware.smack.packet.IQ iq)
-        throws Exception
-    {
-        org.jivesoftware.smack.packet.IQ responseIQ = null;
-
-        if (iq != null)
-        {
-            org.jivesoftware.smack.packet.IQ.Type type = iq.getType();
-
-            if (org.jivesoftware.smack.packet.IQ.Type.GET.equals(type)
-                    || org.jivesoftware.smack.packet.IQ.Type.SET.equals(type))
-            {
-                responseIQ = handleIQRequest(iq);
-                if (responseIQ != null)
-                {
-                    responseIQ.setFrom(iq.getTo());
-                    responseIQ.setPacketID(iq.getPacketID());
-                    responseIQ.setTo(iq.getFrom());
-                }
-            }
-            else if (org.jivesoftware.smack.packet.IQ.Type.ERROR.equals(type)
-                    || org.jivesoftware.smack.packet.IQ.Type.RESULT.equals(
-                            type))
-            {
-                handleIQResponse(iq);
-            }
-        }
-        return responseIQ;
-    }
-
     @Override
-    protected void handleIQError(IQ iq)
+    protected void handleIQErrorImpl(IQ iq)
     {
-        super.handleIQError(iq);
+        super.handleIQErrorImpl(iq);
 
         try
         {
@@ -371,8 +252,9 @@ public class ComponentImpl
         }
         catch (Exception e)
         {
-            logd("An error occurred while trying to handle error IQ.");
-            loge(e);
+            logger.error(
+                "An error occurred while trying to handle an 'error' IQ.",
+                e);
         }
     }
 
@@ -390,104 +272,19 @@ public class ComponentImpl
      * @see AbstractComponent#handleIQGet(IQ)
      */
     @Override
-    protected IQ handleIQGet(IQ iq)
+    protected IQ handleIQGetImpl(IQ iq)
         throws Exception
     {
         IQ resultIQ = handleIQ(iq);
 
-        return (resultIQ == null) ? super.handleIQGet(iq) : resultIQ;
+        return (resultIQ == null) ? super.handleIQGetImpl(iq) : resultIQ;
     }
 
-    private org.jivesoftware.smack.packet.IQ handleIQRequest(
-            org.jivesoftware.smack.packet.IQ request)
-        throws Exception
-    {
-        /*
-         * Requests can be categorized in pieces of Videobridge functionality
-         * based on the org.jivesoftware.smack.packet.IQ runtime type (of their
-         * child element) and forwarded to specialized Videobridge methods for
-         * convenience.
-         */
-        org.jivesoftware.smack.packet.IQ response;
-
-        if (request instanceof ColibriConferenceIQ)
-            response = handleColibriConferenceIQ((ColibriConferenceIQ) request);
-        else if (request instanceof GracefulShutdownIQ)
-            response = handleGracefulShutdownIQ((GracefulShutdownIQ)request);
-        else if (request instanceof org.jivesoftware.smackx.packet.Version)
-            response = handleVersionIQ(
-                (org.jivesoftware.smackx.packet.Version) request);
-        else
-            response = null;
-        return response;
-    }
-
-    /**
-     * Handles a <tt>Version</tt> stanza which represents a request.
-     *
-     * @param versionRequest the <tt>Version</tt> stanza represents
-     * the request to handle
-     * @return an <tt>org.jivesoftware.smack.packet.IQ</tt> stanza which
-     * represents the response to the specified request.
-     */
-    private org.jivesoftware.smack.packet.IQ handleVersionIQ(
-        org.jivesoftware.smackx.packet.Version versionRequest)
-    {
-        VersionService versionService = getVersionService();
-        if (versionService == null)
-        {
-            return org.jivesoftware.smack.packet.IQ.createErrorResponse(
-                versionRequest,
-                new XMPPError(XMPPError.Condition.service_unavailable));
-        }
-
-        org.jitsi.service.version.Version
-            currentVersion = versionService.getCurrentVersion();
-
-        if (currentVersion == null)
-        {
-            return org.jivesoftware.smack.packet.IQ.createErrorResponse(
-                versionRequest,
-                new XMPPError(XMPPError.Condition.interna_server_error));
-        }
-
-        // send packet
-        org.jivesoftware.smackx.packet.Version versionResult =
-            new org.jivesoftware.smackx.packet.Version();
-
-        // to, from and packetId are set by the caller.
-        // versionResult.setTo(versionRequest.getFrom());
-        // versionResult.setFrom(versionRequest.getTo());
-        // versionResult.setPacketID(versionRequest.getPacketID());
-        versionResult.setType(org.jivesoftware.smack.packet.IQ.Type.RESULT);
-
-        versionResult.setName(currentVersion.getApplicationName());
-        versionResult.setVersion(currentVersion.toString());
-        versionResult.setOs(System.getProperty("os.name"));
-
-        return versionResult;
-    }
-
-    private void handleIQResponse(org.jivesoftware.smack.packet.IQ response)
-        throws Exception
-    {
-        /*
-         * Requests can be categorized in pieces of Videobridge functionality
-         * based on the org.jivesoftware.smack.packet.IQ runtime type (of their
-         * child element) and forwarded to specialized Videobridge methods for
-         * convenience. However, responses cannot be categorized because they
-         * care the id of their respective requests only.
-         */
-        Videobridge videobridge = getVideobridge();
-
-        if (videobridge != null)
-            videobridge.handleIQResponse(response);
-    }
 
     @Override
-    protected void handleIQResult(IQ iq)
+    protected void handleIQResultImpl(IQ iq)
     {
-        super.handleIQResult(iq);
+        super.handleIQResultImpl(iq);
 
         try
         {
@@ -495,8 +292,9 @@ public class ComponentImpl
         }
         catch (Exception e)
         {
-            logd("An error occurred while trying to handle result IQ.");
-            loge(e);
+            logger.error(
+                "An error occurred while trying to handle a 'result' IQ.",
+                e);
         }
     }
 
@@ -514,12 +312,12 @@ public class ComponentImpl
      * @see AbstractComponent#handleIQSet(IQ)
      */
     @Override
-    protected IQ handleIQSet(IQ iq)
+    protected IQ handleIQSetImpl(IQ iq)
         throws Exception
     {
         IQ resultIQ = handleIQ(iq);
 
-        return (resultIQ == null) ? super.handleIQSet(iq) : resultIQ;
+        return (resultIQ == null) ? super.handleIQSetImpl(iq) : resultIQ;
     }
 
     /**
@@ -571,25 +369,28 @@ public class ComponentImpl
              * value of the from property of the Packet must not be null;
              * otherwise, an IllegalArgumentException will be thrown.
              */
-            String from = iq.getFrom();
+            Jid from = iq.getFrom();
 
             if ((from == null) || (from.length() == 0))
             {
                 JID fromJID = getJID();
 
                 if (fromJID != null)
-                    iq.setFrom(fromJID.toString());
+                    iq.setFrom(JidCreate.from(fromJID.toString()));
             }
 
             Packet packet = IQUtils.convert(iq);
 
             send(packet);
 
-            logd("SENT: " + packet.toXML());
+            logger.debug(() -> "SENT: " + packet.toXML());
         }
         catch (Exception e)
         {
-            loge(e);
+            logger.error(
+                "Failed to send an IQ with id="
+                    + (iq == null ? "null" : iq.getStanzaId()),
+                e);
             throw e;
         }
     }
@@ -609,13 +410,28 @@ public class ComponentImpl
     public void start(BundleContext bundleContext)
         throws Exception
     {
-        this.bundleContext = bundleContext;
+        common.start(bundleContext);
 
         // Register this instance as an OSGi service.
         Collection<ComponentImpl> components = getComponents(bundleContext);
 
         if (!components.contains(this))
+        {
             bundleContext.registerService(ComponentImpl.class, this, null);
+        }
+
+        // Schedule ping task
+        // note: the task if stopped automatically on component shutdown
+        ConfigurationService config
+            = ServiceUtils2.getService(
+                    bundleContext, ConfigurationService.class);
+
+        loadConfig(config, "org.jitsi.videobridge");
+
+        if (!isPingTaskStarted())
+        {
+            startPingTask();
+        }
     }
 
     /**
@@ -647,13 +463,15 @@ public class ComponentImpl
                     Object service = bundleContext.getService(serviceReference);
 
                     if (service == this)
+                    {
                         bundleContext.ungetService(serviceReference);
+                    }
                 }
             }
         }
         finally
         {
-            this.bundleContext = null;
+            common.stop(bundleContext);
         }
     }
 }

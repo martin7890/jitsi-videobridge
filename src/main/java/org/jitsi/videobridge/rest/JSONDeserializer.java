@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,10 @@ import java.lang.reflect.*;
 import java.net.*;
 import java.util.*;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
-
-import org.jitsi.service.neomedia.*;
+import org.jitsi.utils.*;
+import org.jitsi.xmpp.extensions.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 import org.json.simple.*;
 
 /**
@@ -32,7 +31,7 @@ import org.json.simple.*;
  *
  * @author Lyubomir Marinov
  */
-final class JSONDeserializer
+public final class JSONDeserializer
 {
     /**
      * Deserializes the values of a <tt>JSONObject</tt> which are neither
@@ -51,12 +50,11 @@ final class JSONDeserializer
             JSONObject jsonObject,
             AbstractPacketExtension abstractPacketExtension)
     {
-        @SuppressWarnings("unchecked")
-        Iterator<Map.Entry<Object,Object>> i = jsonObject.entrySet().iterator();
 
-        while (i.hasNext())
+        for (Map.Entry<Object, Object> e : (Iterable<Map.Entry<Object,
+            Object>>) jsonObject
+            .entrySet())
         {
-            Map.Entry<Object,Object> e = i.next();
             Object key = e.getKey();
 
             if (key != null)
@@ -68,7 +66,7 @@ final class JSONDeserializer
                     Object value = e.getValue();
 
                     if (!(value instanceof JSONObject)
-                            && !(value instanceof JSONArray))
+                        && !(value instanceof JSONArray))
                     {
                         abstractPacketExtension.setAttribute(name, value);
                     }
@@ -94,13 +92,9 @@ final class JSONDeserializer
             {
                 candidateIQ = candidateIQClass.newInstance();
             }
-            catch (IllegalAccessException iae)
+            catch (IllegalAccessException | InstantiationException iae)
             {
                 throw new UndeclaredThrowableException(iae);
-            }
-            catch (InstantiationException ie)
-            {
-                throw new UndeclaredThrowableException(ie);
             }
             // attributes
             deserializeAbstractPacketExtensionAttributes(
@@ -144,7 +138,7 @@ final class JSONDeserializer
                 = channel.get(ColibriConferenceIQ.Channel.DIRECTION_ATTR_NAME);
             Object lastN
                 = channel.get(ColibriConferenceIQ.Channel.LAST_N_ATTR_NAME);
-            Object receivingSimulcastLayer
+            Object receivingSimulcastStream
                 = channel.get(
                         ColibriConferenceIQ.Channel.RECEIVING_SIMULCAST_LAYER);
             Object payloadTypes = channel.get(JSONSerializer.PAYLOAD_TYPES);
@@ -163,58 +157,87 @@ final class JSONDeserializer
             // direction
             if (direction != null)
             {
-                channelIQ.setDirection(
-                        MediaDirection.parseString(direction.toString()));
+                channelIQ.setDirection(direction.toString());
             }
             // lastN
             if (lastN != null)
             {
-                Integer i;
-
-                if (lastN instanceof Integer)
-                    i = (Integer) lastN;
-                else if (lastN instanceof Number)
-                    i = Integer.valueOf(((Number) lastN).intValue());
-                else
-                    i = Integer.valueOf(lastN.toString());
-                channelIQ.setLastN(i);
+                channelIQ.setLastN(objectToInteger(lastN));
             }
-            // receivingSimulcastLayer
-            if (receivingSimulcastLayer != null)
+            // receivingSimulcastStream
+            if (receivingSimulcastStream != null)
             {
-                Integer i;
-
-                if (receivingSimulcastLayer instanceof Integer)
-                    i = (Integer) receivingSimulcastLayer;
-                else if (receivingSimulcastLayer instanceof Number)
-                    i = Integer.valueOf(
-                            ((Number) receivingSimulcastLayer).intValue());
-                else
-                    i = Integer.valueOf(receivingSimulcastLayer.toString());
-                channelIQ.setReceivingSimulcastLayer(i);
+                channelIQ.setReceivingSimulcastLayer(
+                    objectToInteger(receivingSimulcastStream));
             }
             // payloadTypes
             if (payloadTypes != null)
+            {
                 deserializePayloadTypes((JSONArray) payloadTypes, channelIQ);
+            }
             // rtpLevelRelayType
             if (rtpLevelRelayType != null)
+            {
                 channelIQ.setRTPLevelRelayType(rtpLevelRelayType.toString());
+            }
             // sources
             if (sources != null)
+            {
                 deserializeSources((JSONArray) sources, channelIQ);
+            }
             // source groups
             if (sourceGroups != null)
+            {
                 deserializeSourceGroups((JSONArray) sourceGroups, channelIQ);
+            }
             // ssrcs
             if (ssrcs != null)
+            {
                 deserializeSSRCs((JSONArray) ssrcs, channelIQ);
+            }
             // header extensions
             if (headerExtensions != null)
-                deserializeHeaderExtensions((JSONArray) headerExtensions, channelIQ);
+            {
+                deserializeHeaderExtensions(
+                        (JSONArray) headerExtensions,
+                        channelIQ);
+            }
 
             contentIQ.addChannel(channelIQ);
         }
         return channelIQ;
+    }
+
+    private static Integer objectToInteger(Object o)
+    {
+        Integer i;
+
+        if (o instanceof Integer)
+        {
+            i = (Integer) o;
+        }
+        else if (o instanceof Number)
+        {
+            i = ((Number) o).intValue();
+        }
+        else
+        {
+            i = Integer.valueOf(o.toString());
+        }
+
+        return i;
+    }
+
+    private static Boolean objectToBoolean(Object o)
+    {
+        if (o instanceof Boolean)
+        {
+            return (Boolean) o;
+        }
+        else
+        {
+            return Boolean.valueOf(o.toString());
+        }
     }
 
     public static ColibriConferenceIQ.ChannelBundle deserializeChannelBundle(
@@ -241,11 +264,45 @@ final class JSONDeserializer
                         (id == null) ? null : id.toString());
             // transport
             if (transport != null)
+            {
                 deserializeTransport((JSONObject) transport, channelBundleIQ);
+            }
 
             conferenceIQ.addChannelBundle(channelBundleIQ);
         }
         return channelBundleIQ;
+    }
+
+    public static ColibriConferenceIQ.Endpoint deserializeEndpoint(
+            JSONObject endpoint,
+            ColibriConferenceIQ conferenceIQ)
+    {
+        ColibriConferenceIQ.Endpoint endpointIQ;
+
+        if (endpoint == null)
+        {
+            endpointIQ = null;
+        }
+        else
+        {
+            Object id
+                = endpoint.get(ColibriConferenceIQ.Endpoint.ID_ATTR_NAME);
+            Object statsId
+                = endpoint.get(ColibriConferenceIQ.Endpoint.STATS_ID_ATTR_NAME);
+            Object displayName
+                = endpoint.get(
+                    ColibriConferenceIQ.Endpoint.DISPLAYNAME_ATTR_NAME);
+
+
+            endpointIQ
+                = new ColibriConferenceIQ.Endpoint(
+                        Objects.toString(id, null),
+                        Objects.toString(statsId, null),
+                        Objects.toString(displayName, null));
+
+            conferenceIQ.addEndpoint(endpointIQ);
+        }
+        return endpointIQ;
     }
 
     public static void deserializeChannelBundles(
@@ -258,6 +315,21 @@ final class JSONDeserializer
             {
                 deserializeChannelBundle(
                         (JSONObject) channelBundle,
+                        conferenceIQ);
+            }
+        }
+    }
+
+    public static void deserializeEndpoints(
+            JSONArray endpoints,
+            ColibriConferenceIQ conferenceIQ)
+    {
+        if ((endpoints != null) && !endpoints.isEmpty())
+        {
+            for (Object endpoint : endpoints)
+            {
+                deserializeEndpoint(
+                        (JSONObject) endpoint,
                         conferenceIQ);
             }
         }
@@ -284,39 +356,39 @@ final class JSONDeserializer
 
         // id
         if (id != null)
+        {
             channelIQ.setID(id.toString());
+        }
         // channelBundleId
         if (channelBundleId != null)
+        {
             channelIQ.setChannelBundleId(channelBundleId.toString());
+        }
         // endpoint
         if (endpoint != null)
+        {
             channelIQ.setEndpoint(endpoint.toString());
+        }
         // expire
         if (expire != null)
         {
-            int i;
+            int i = objectToInteger(expire);
 
-            if (expire instanceof Number)
-                i = ((Number) expire).intValue();
-            else
-                i = Integer.parseInt(expire.toString());
             if (i != ColibriConferenceIQ.Channel.EXPIRE_NOT_SPECIFIED)
+            {
                 channelIQ.setExpire(i);
+            }
         }
         // initiator
         if (initiator != null)
         {
-            Boolean b;
-
-            if (initiator instanceof Boolean)
-                b = (Boolean) initiator;
-            else
-                b = Boolean.valueOf(initiator.toString());
-            channelIQ.setInitiator(b);
+            channelIQ.setInitiator(objectToBoolean(initiator));
         }
         // transport
         if (transport != null)
+        {
             deserializeTransport((JSONObject) transport, channelIQ);
+        }
     }
 
     public static void deserializeChannels(
@@ -326,7 +398,9 @@ final class JSONDeserializer
         if ((channels != null) && !channels.isEmpty())
         {
             for (Object channel : channels)
+            {
                 deserializeChannel((JSONObject) channel, contentIQ);
+            }
         }
     }
 
@@ -345,8 +419,8 @@ final class JSONDeserializer
             Object contents = conference.get(JSONSerializer.CONTENTS);
             Object channelBundles
                 = conference.get(JSONSerializer.CHANNEL_BUNDLES);
-            Object recording
-                = conference.get(ColibriConferenceIQ.Recording.ELEMENT_NAME);
+            Object endpoints
+                = conference.get(JSONSerializer.ENDPOINTS);
             Object strategy
                 = conference.get(ColibriConferenceIQ
                         .RTCPTerminationStrategy.ELEMENT_NAME);
@@ -357,10 +431,14 @@ final class JSONDeserializer
             conferenceIQ = new ColibriConferenceIQ();
             // id
             if (id != null)
+            {
                 conferenceIQ.setID(id.toString());
+            }
             // contents
             if (contents != null)
+            {
                 deserializeContents((JSONArray) contents, conferenceIQ);
+            }
             // channelBundles
             if (channelBundles != null)
             {
@@ -368,14 +446,22 @@ final class JSONDeserializer
                         (JSONArray) channelBundles,
                         conferenceIQ);
             }
-            // recording
-            if (recording != null)
-                deserializeRecording((JSONObject) recording, conferenceIQ);
-            if (strategy != null)
-                deserializeRTCPTerminationStrategy((JSONObject) strategy,
+            // endpoints
+            if (endpoints != null)
+            {
+                deserializeEndpoints(
+                        (JSONArray) endpoints,
                         conferenceIQ);
+            }
+            if (strategy != null)
+            {
+                deserializeRTCPTerminationStrategy(
+                    (JSONObject) strategy, conferenceIQ);
+            }
             if (shutdownExt != null)
+            {
                 conferenceIQ.setGracefulShutdown(true);
+            }
         }
         return conferenceIQ;
     }
@@ -389,9 +475,11 @@ final class JSONDeserializer
                     = strategy.get(ColibriConferenceIQ
                         .RTCPTerminationStrategy.NAME_ATTR_NAME);
 
-            String name;
-            if (attrName == null || (name = attrName.toString()).length() == 0)
+            String name = Objects.toString(attrName, null);
+            if (StringUtils.isNullOrEmpty(name))
+            {
                 return;
+            }
 
             ColibriConferenceIQ.RTCPTerminationStrategy strategyIQ
                     = new ColibriConferenceIQ.RTCPTerminationStrategy();
@@ -421,11 +509,12 @@ final class JSONDeserializer
                 = content.get(JSONSerializer.SCTP_CONNECTIONS);
 
             contentIQ
-                = conferenceIQ.getOrCreateContent(
-                        (name == null) ? null : name.toString());
+                = conferenceIQ.getOrCreateContent(Objects.toString(name, null));
             // channels
             if (channels != null)
+            {
                 deserializeChannels((JSONArray) channels, contentIQ);
+            }
             // sctpConnections
             if (sctpConnections != null)
             {
@@ -446,7 +535,9 @@ final class JSONDeserializer
         if ((contents != null) && !contents.isEmpty())
         {
             for (Object content : contents)
+            {
                 deserializeContent((JSONObject) content, conferenceIQ);
+            }
         }
     }
 
@@ -468,7 +559,9 @@ final class JSONDeserializer
             fingerprintIQ = new DtlsFingerprintPacketExtension();
             // fingerprint
             if (theFingerprint != null)
+            {
                 fingerprintIQ.setFingerprint(theFingerprint.toString());
+            }
             // attributes
             deserializeAbstractPacketExtensionAttributes(
                     fingerprint,
@@ -496,7 +589,9 @@ final class JSONDeserializer
         if ((fingerprints != null) && !fingerprints.isEmpty())
         {
             for (Object fingerprint : fingerprints)
+            {
                 deserializeFingerprint((JSONObject) fingerprint, transportIQ);
+            }
         }
     }
 
@@ -506,13 +601,11 @@ final class JSONDeserializer
     {
         if (parameters != null)
         {
-            @SuppressWarnings("unchecked")
-            Iterator<Map.Entry<Object,Object>> i
-                = parameters.entrySet().iterator();
 
-            while (i.hasNext())
+            for (Map.Entry<Object, Object> e
+                        : (Iterable<Map.Entry<Object, Object>>) parameters
+                                .entrySet())
             {
-                Map.Entry<Object,Object> e = i.next();
                 Object name = e.getKey();
                 Object value = e.getValue();
 
@@ -520,8 +613,35 @@ final class JSONDeserializer
                 {
                     payloadTypeIQ.addParameter(
                             new ParameterPacketExtension(
-                                    (name == null) ? null : name.toString(),
-                                    (value == null) ? null : value.toString()));
+                                    Objects.toString(name, null),
+                                    Objects.toString(value, null)));
+                }
+            }
+        }
+    }
+
+    public static void deserializeRtcpFbs(
+            JSONArray rtcpFbs,
+            PayloadTypePacketExtension payloadTypeIQ)
+    {
+        if (rtcpFbs != null)
+        {
+            for (Object iter : rtcpFbs)
+            {
+                JSONObject rtcpFb = (JSONObject) iter;
+                String type = (String)
+                        rtcpFb.get(RtcpFbPacketExtension.TYPE_ATTR_NAME);
+                String subtype = (String)
+                        rtcpFb.get(RtcpFbPacketExtension.SUBTYPE_ATTR_NAME);
+                if (type != null)
+                {
+                    RtcpFbPacketExtension ext = new RtcpFbPacketExtension();
+                    ext.setFeedbackType(type);
+                    if (subtype != null)
+                    {
+                        ext.setFeedbackSubtype(subtype);
+                    }
+                    payloadTypeIQ.addRtcpFeedbackType(ext);
                 }
             }
         }
@@ -540,7 +660,7 @@ final class JSONDeserializer
         {
             Long id = (Long)headerExtension.get(RTPHdrExtPacketExtension.ID_ATTR_NAME);
             String uriString = (String)headerExtension.get(RTPHdrExtPacketExtension.URI_ATTR_NAME);
-            URI uri = null;
+            URI uri;
             try
             {
                 uri = new URI(uriString);
@@ -599,7 +719,15 @@ final class JSONDeserializer
                     payloadTypeIQ);
             // parameters
             if (parameters != null)
+            {
                 deserializeParameters((JSONObject) parameters, payloadTypeIQ);
+            }
+
+            Object rtcpFbs = payloadType.get(JSONSerializer.RTCP_FBS);
+
+            if (rtcpFbs != null && rtcpFbs instanceof JSONArray) {
+                deserializeRtcpFbs((JSONArray) rtcpFbs, payloadTypeIQ);
+            }
 
             channelIQ.addPayloadType(payloadTypeIQ);
         }
@@ -613,37 +741,10 @@ final class JSONDeserializer
         if ((payloadTypes != null) && !payloadTypes.isEmpty())
         {
             for (Object payloadType : payloadTypes)
+            {
                 deserializePayloadType((JSONObject) payloadType, channelIQ);
+            }
         }
-    }
-
-    public static void deserializeRecording(JSONObject recording,
-                                            ColibriConferenceIQ conferenceIQ)
-    {
-        Object state
-            = recording.get(ColibriConferenceIQ.Recording.STATE_ATTR_NAME);
-        if (state == null)
-            return;
-
-        Boolean b
-                = (state instanceof Boolean)
-                ? (Boolean) state
-                : Boolean.valueOf(state.toString());
-
-        ColibriConferenceIQ.Recording recordingIQ
-                = new ColibriConferenceIQ.Recording(b);
-
-        Object token
-            = recording.get(ColibriConferenceIQ.Recording.TOKEN_ATTR_NAME);
-        if (token != null)
-            recordingIQ.setToken(token.toString());
-
-        Object directory
-                = recording.get(ColibriConferenceIQ.Recording.DIRECTORY_ATTR_NAME);
-        if (directory != null)
-            recordingIQ.setDirectory(directory.toString());
-
-        conferenceIQ.setRecording(recordingIQ);
     }
 
     public static ColibriConferenceIQ.SctpConnection deserializeSctpConnection(
@@ -668,15 +769,7 @@ final class JSONDeserializer
             // port
             if (port != null)
             {
-                Integer i;
-
-                if (port instanceof Integer)
-                    i = (Integer) port;
-                else if (port instanceof Number)
-                    i = Integer.valueOf(((Number) port).intValue());
-                else
-                    i = Integer.valueOf(port.toString());
-                sctpConnectionIQ.setPort(i);
+                sctpConnectionIQ.setPort(objectToInteger(port));
             }
 
             contentIQ.addSctpConnection(sctpConnectionIQ);
@@ -699,12 +792,13 @@ final class JSONDeserializer
         }
     }
 
-    public static GracefulShutdownIQ deserializeShutdownIQ(
+    public static ShutdownIQ deserializeShutdownIQ(
         JSONObject requestJSONObject)
     {
-        return requestJSONObject.get(
-            GracefulShutdownIQ.ELEMENT_NAME) != null
-                    ? new GracefulShutdownIQ() : null;
+        String element = (String) requestJSONObject.keySet().iterator().next();
+
+        return ShutdownIQ.isValidElementName(element) ?
+            ShutdownIQ.createShutdownIQ(element) : null;
     }
 
     public static SourcePacketExtension deserializeSource(
@@ -788,7 +882,7 @@ final class JSONDeserializer
                 {
                     JSONArray sourcesJSONArray = (JSONArray) sourcesObject;
                     List<SourcePacketExtension> sourcePacketExtensions
-                            = new ArrayList<SourcePacketExtension>();
+                        = new ArrayList<>();
 
                     for (Object source : sourcesJSONArray)
                     {
@@ -796,11 +890,13 @@ final class JSONDeserializer
                                 = deserializeSource(source);
 
                         if (sourcePacketExtension != null)
+                        {
                             sourcePacketExtensions.add(sourcePacketExtension);
+                        }
                     }
 
                     sourceGroupIQ = new SourceGroupPacketExtension();
-                    sourceGroupIQ.setSemantics((String)semantics);
+                    sourceGroupIQ.setSemantics(Objects.toString(semantics));
                     sourceGroupIQ.addSources(sourcePacketExtensions);
                     channelIQ.addSourceGroup(sourceGroupIQ);
                 }
@@ -824,7 +920,9 @@ final class JSONDeserializer
         if ((sourceGroups != null) && !sourceGroups.isEmpty())
         {
             for (Object sourceGroup : sourceGroups)
+            {
                 deserializeSourceGroup(sourceGroup, channelIQ);
+            }
         }
     }
 
@@ -835,7 +933,9 @@ final class JSONDeserializer
         if ((sources != null) && !sources.isEmpty())
         {
             for (Object source : sources)
+            {
                 deserializeSource(source, channelIQ);
+            }
         }
     }
 
@@ -855,9 +955,13 @@ final class JSONDeserializer
                 String s = o.toString();
 
                 if (s.startsWith("-"))
+                {
                     i = Integer.parseInt(s);
+                }
                 else
+                {
                     i = (int) Long.parseLong(s);
+                }
             }
         }
         return i;
@@ -906,11 +1010,14 @@ final class JSONDeserializer
             Object rtcpMux = transport.get(RtcpmuxPacketExtension.ELEMENT_NAME);
 
             if (IceUdpTransportPacketExtension.NAMESPACE.equals(xmlns))
+            {
                 transportIQ = new IceUdpTransportPacketExtension();
-            else if (RawUdpTransportPacketExtension.NAMESPACE.equals(xmlns))
-                transportIQ = new RawUdpTransportPacketExtension();
+            }
             else
+            {
                 transportIQ = null;
+            }
+
             if (transportIQ != null)
             {
                 // attributes
@@ -940,19 +1047,9 @@ final class JSONDeserializer
                             transportIQ);
                 }
                 // rtcpMux
-                if (rtcpMux != null)
+                if (rtcpMux != null && objectToBoolean(rtcpMux))
                 {
-                    boolean b;
-
-                    if (rtcpMux instanceof Boolean)
-                        b = ((Boolean) rtcpMux).booleanValue();
-                    else
-                        b = Boolean.parseBoolean(rtcpMux.toString());
-                    if (b)
-                    {
-                        transportIQ.addChildExtension(
-                                new RtcpmuxPacketExtension());
-                    }
+                    transportIQ.addChildExtension(new RtcpmuxPacketExtension());
                 }
             }
         }
@@ -967,7 +1064,9 @@ final class JSONDeserializer
             = deserializeTransport(transport);
 
         if (transportIQ != null)
+        {
             channelBundleIQ.setTransport(transportIQ);
+        }
         return transportIQ;
     }
 
@@ -979,7 +1078,9 @@ final class JSONDeserializer
             = deserializeTransport(transport);
 
         if (transportIQ != null)
+        {
             channelIQ.setTransport(transportIQ);
+        }
         return transportIQ;
     }
 

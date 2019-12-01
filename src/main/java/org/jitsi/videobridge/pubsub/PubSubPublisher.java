@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,17 @@
 package org.jitsi.videobridge.pubsub;
 
 import java.util.*;
-
-import net.java.sip.communicator.util.*;
+import java.util.concurrent.*;
 
 import org.jitsi.videobridge.stats.*;
 import org.jitsi.videobridge.xmpp.*;
+import org.jitsi.utils.logging2.*;
 import org.jivesoftware.smack.packet.*;
+import org.jivesoftware.smack.packet.id.*;
 import org.jivesoftware.smackx.pubsub.*;
 import org.jivesoftware.smackx.pubsub.packet.*;
+import org.jivesoftware.smackx.xdata.packet.*;
+import org.jxmpp.jid.*;
 import org.osgi.framework.*;
 
 /**
@@ -39,20 +42,20 @@ public class PubSubPublisher
      * Maps a service name (e.g. &quot;pubsub.example.com&quot;) to the
      * <tt>PubSubPublisher</tt> instance responsible for it.
      */
-    private static final Map<String, PubSubPublisher> instances
-        = new HashMap<String, PubSubPublisher>();
+    private static final Map<Jid, PubSubPublisher> instances
+        = new ConcurrentHashMap<>();
 
     /**
      * The <tt>Logger</tt> used by the <tt>PubSubPublisher</tt> class and its
      * instances to print debug information.
      */
     private static final Logger logger
-        = Logger.getLogger(PubSubPublisher.class);
+        = new LoggerImpl(PubSubPublisher.class.getName());
 
     /**
      * The default timeout of the packets in milliseconds.
      */
-    private static final int PACKET_TIMEOUT = 500;
+    private static final int PACKET_TIMEOUT = 5000;
 
     /**
      * Gets a <tt>PubSubPublisher</tt> instance for a specific service (name).
@@ -63,19 +66,16 @@ public class PubSubPublisher
      * @return the <tt>PubSubPublisher</tt> instance for the specified
      * <tt>serviceName</tt>
      */
-    public static PubSubPublisher getPubsubManager(String serviceName)
+    public static PubSubPublisher getPubsubManager(Jid serviceName)
     {
-        PubSubPublisher publisher;
+        PubSubPublisher publisher = instances.get(serviceName);
 
-        if (instances.containsKey(serviceName))
-        {
-            publisher = instances.get(serviceName);
-        }
-        else
+        if (publisher == null)
         {
             publisher = new PubSubPublisher(serviceName);
             instances.put(serviceName, publisher);
         }
+
         return publisher;
     }
 
@@ -88,7 +88,7 @@ public class PubSubPublisher
     {
         IQ.Type type = response.getType();
 
-        if (IQ.Type.ERROR.equals(type))
+        if (IQ.Type.error.equals(type))
         {
             PubSubPublisher publisher = instances.get(response.getFrom());
 
@@ -97,7 +97,7 @@ public class PubSubPublisher
                 publisher.handleErrorResponse(response);
             }
         }
-        else if (IQ.Type.RESULT.equals(type))
+        else if (IQ.Type.result.equals(type))
         {
             PubSubPublisher publisher = instances.get(response.getFrom());
 
@@ -125,36 +125,35 @@ public class PubSubPublisher
     /**
      * Listeners for response events.
      */
-    private List<PubSubResponseListener> listeners
-        = new LinkedList<PubSubResponseListener>();
+    private List<PubSubResponseListener> listeners = new LinkedList<>();
 
     /**
      * List of the accessible PubSub nodes.
      */
-    private List<String> nodes = new LinkedList<String>();
+    private List<String> nodes = new LinkedList<>();
 
     /**
      * Map with the requests for configuring a node.
      */
     private Map<String, String> pendingConfigureRequests
-        = new HashMap<String, String>();
+        = new ConcurrentHashMap<>();
 
     /**
      * Map with the requests for node creation.
      */
     private Map<String, String> pendingCreateRequests
-        = new HashMap<String, String>();
+        = new ConcurrentHashMap<>();
 
     /**
      * Map with the publish requests.
      */
     private Map<String, String> pendingPublishRequests
-        = new HashMap<String, String>();
+        = new ConcurrentHashMap<>();
 
     /**
      * The name of the PubSub service.
      */
-    private String serviceName;
+    private Jid serviceName;
 
     /**
      * Timer for timeout of the requests that we are sending.
@@ -167,7 +166,7 @@ public class PubSubPublisher
      *
      * @param serviceName the name of the service.
      */
-    private PubSubPublisher(String serviceName)
+    private PubSubPublisher(Jid serviceName)
     {
         this.serviceName = serviceName;
     }
@@ -193,19 +192,20 @@ public class PubSubPublisher
      */
     private void configureNode(String nodeName)
     {
-        ConfigureForm cfg = new ConfigureForm(FormType.submit);
+        ConfigureForm cfg = new ConfigureForm(DataForm.Type.submit);
         PubSub pubsub = new PubSub();
 
         cfg.setAccessModel(AccessModel.open);
         cfg.setPersistentItems(false);
         cfg.setPublishModel(PublishModel.open);
         pubsub.setTo(serviceName);
-        pubsub.setType(IQ.Type.SET);
+        pubsub.setType(IQ.Type.set);
 
-        final String packetID = IQ.nextID();
+        final String packetID = StanzaIdUtil.newStanzaId();
 
-        pubsub.setPacketID(packetID);
-        pubsub.addExtension(new FormNode(FormNodeType.CONFIGURE_OWNER, cfg));
+        pubsub.setStanzaId(packetID);
+        pubsub.addExtension(
+            new FormNode(FormNodeType.CONFIGURE_OWNER, nodeName ,cfg));
         try
         {
             send(pubsub);
@@ -229,8 +229,9 @@ public class PubSubPublisher
                         if(nodeName != null)
                         {
                             logger.error(
-                                    "Configuration of the node failed: "
-                                        + nodeName);
+                                    "Timed out a configuration request "
+                                        + "(packetID=: " + packetID
+                                        + " nodeName=" + nodeName + ")");
                             fireResponseCreateEvent(
                                     PubSubResponseListener.Response.SUCCESS);
                         }
@@ -251,27 +252,36 @@ public class PubSubPublisher
         PubSub request = new PubSub();
 
         request.setTo(serviceName);
-        request.setType(IQ.Type.SET);
+        request.setType(IQ.Type.set);
 
-        final String packetID = Packet.nextID();
+        final String packetID = StanzaIdUtil.newStanzaId();
 
-        request.setPacketID(packetID);
+        request.setStanzaId(packetID);
         request.addExtension(
                 new NodeExtension(PubSubElementType.CREATE, nodeName));
 
         pendingCreateRequests.put(packetID, nodeName);
+
+        // Send the request before starting the timer, as we have observed
+        // sending to be significantly delayed (possibly waiting for the XMPP
+        // component connection to become ready).
+        send(request);
+
         timeoutTimer.schedule(
                 new TimerTask()
                 {
                     @Override
                     public void run()
                     {
-                        pendingCreateRequests.remove(packetID);
+                        String nodeName = pendingCreateRequests.remove(packetID);
+                        if (nodeName != null)
+                        {
+                            logger.warn("Timed out a create request with ID "
+                                            + packetID);
+                        }
                     }
                 },
                 PACKET_TIMEOUT);
-
-        send(request);
     }
 
     /**
@@ -322,7 +332,7 @@ public class PubSubPublisher
      */
     private void handleConfigureResponse(IQ response)
     {
-        if(pendingConfigureRequests.remove(response.getPacketID()) != null)
+        if(pendingConfigureRequests.remove(response.getStanzaId()) != null)
             fireResponseCreateEvent(PubSubResponseListener.Response.SUCCESS);
     }
 
@@ -333,7 +343,7 @@ public class PubSubPublisher
      */
     private void handleCreateNodeResponse(IQ response)
     {
-        String packetID = response.getPacketID();
+        String packetID = response.getStanzaId();
         String nodeName = pendingCreateRequests.remove(packetID);
 
         if (nodeName != null)
@@ -351,25 +361,22 @@ public class PubSubPublisher
     private void handleErrorResponse(IQ response)
     {
         XMPPError err = response.getError();
-        String packetID = response.getPacketID();
+        String packetID = response.getStanzaId();
 
         if(err != null)
         {
             XMPPError.Type errType = err.getType();
-            String errCondition = err.getCondition();
+            XMPPError.Condition errCondition = err.getCondition();
 
             if((XMPPError.Type.CANCEL.equals(errType)
-                        && (XMPPError.Condition.conflict.toString().equals(
-                                errCondition)
-                            || XMPPError.Condition.forbidden.toString().equals(
+                        && (XMPPError.Condition.conflict.equals(errCondition)
+                            || XMPPError.Condition.forbidden.equals(
                                     errCondition)))
                     /* prosody bug, for backward compatibility */
                     || (XMPPError.Type.AUTH.equals(errType)
-                        && XMPPError.Condition.forbidden.toString().equals(
-                                errCondition)))
+                        && XMPPError.Condition.forbidden.equals(errCondition)))
             {
-                if (XMPPError.Condition.forbidden.toString().equals(
-                        errCondition))
+                if (XMPPError.Condition.forbidden.equals(errCondition))
                 {
                     logger.warn(
                             "Creating node failed with <forbidden/> error."
@@ -377,6 +384,8 @@ public class PubSubPublisher
                 }
 
                 String nodeName = pendingCreateRequests.remove(packetID);
+                logger.info("PubSub node already exists (packetID=" + packetID
+                        + " nodeName=" + nodeName +")");
 
                 if (nodeName != null)
                 {
@@ -420,7 +429,7 @@ public class PubSubPublisher
         errMsg.append(".");
         if(err != null)
         {
-            errMsg.append(" Message: ").append(err.getMessage())
+            errMsg.append(" Message: ").append(err.getDescriptiveText())
                     .append(". Condition: ").append(err.getCondition())
                     .append(". For packet with id: ").append(packetID)
                     .append(".");
@@ -435,7 +444,7 @@ public class PubSubPublisher
      */
     private void handlePublishResponse(IQ response)
     {
-        if (pendingPublishRequests.remove(response.getPacketID()) != null)
+        if (pendingPublishRequests.remove(response.getStanzaId()) != null)
         {
             fireResponsePublishEvent(
                     PubSubResponseListener.Response.SUCCESS,
@@ -447,10 +456,13 @@ public class PubSubPublisher
      * Publishes items to a given PubSub node.
      *
      * @param nodeName the PubSub node.
+     * @param itemId the ID of the item to be published. If <tt>null</tt> the
+     *               XMPP server will generate random ID by itself.
      * @param ext the item to be send.
-     * @throws Exception if fail to send the item or the node is not created.
+     * @throws IllegalArgumentException if the node does not exist.
+     * @throws Exception if fail to send the item.
      */
-    public void publish(String nodeName, PacketExtension ext)
+    public void publish(String nodeName, String itemId, ExtensionElement ext)
         throws Exception
     {
         if(!nodes.contains(nodeName))
@@ -459,17 +471,15 @@ public class PubSubPublisher
         PubSub packet = new PubSub();
 
         packet.setTo(serviceName);
-        packet.setType(IQ.Type.SET);
+        packet.setType(IQ.Type.set);
 
-        final String packetID = IQ.nextID();
+        final String packetID = StanzaIdUtil.newStanzaId();
 
-        packet.setPacketID(packetID);
+        packet.setStanzaId(packetID);
 
-        PayloadItem<PacketExtension> item
-            = new PayloadItem<PacketExtension>(ext);
+        PayloadItem<ExtensionElement> item = new PayloadItem<>(itemId, ext);
 
-        packet.addExtension(
-            new PublishItem<PayloadItem<PacketExtension>>(nodeName, item));
+        packet.addExtension(new PublishItem<>(nodeName, item));
         pendingPublishRequests.put(packetID, nodeName);
         timeoutTimer.schedule(
                 new TimerTask()
@@ -483,7 +493,7 @@ public class PubSubPublisher
                         if(nodeName != null)
                         {
                             logger.error(
-                                    "Publish request timeout: " + nodeName);
+                                    "Timed out a publish request: " + nodeName);
                         }
                     }
                 },

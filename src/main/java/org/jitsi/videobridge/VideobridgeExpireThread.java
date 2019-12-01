@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,51 +15,150 @@
  */
 package org.jitsi.videobridge;
 
-import java.lang.ref.*;
+import java.util.*;
+import java.util.concurrent.*;
 
-import org.jitsi.util.*;
+import org.jitsi.osgi.*;
+import org.jitsi.service.configuration.*;
+import org.jitsi.utils.concurrent.*;
+import org.jitsi.utils.logging2.*;
+import org.osgi.framework.*;
 
 /**
- * Implements a <tt>Thread</tt> which expires the {@link Channel}s of a specific
- * <tt>Videobridge</tt>.
+ * Implements a <tt>Thread</tt> which expires the {@link AbstractEndpoint}s and
+ * {@link Conference}s of a specific <tt>Videobridge</tt>.
  *
  * @author Lyubomir Marinov
  */
-class VideobridgeExpireThread
-    extends Thread
+public class VideobridgeExpireThread
 {
-
     /**
      * The <tt>Logger</tt> used by the <tt>VideobridgeExpireThread</tt> class
      * and its instances to print debug information.
      */
-    private static final Logger logger
-        = Logger.getLogger(VideobridgeExpireThread.class);
+    private static final Logger logger =
+        new LoggerImpl(VideobridgeExpireThread.class.getName());
 
     /**
-     * The <tt>Videobridge</tt> which has its {@link Channel}s expired by this
-     * instance. <tt>WeakReference</tt>d to allow this instance to determine
-     * when it is to stop executing.
+     * The executor which periodically calls {@link #expire(Videobridge)} (if
+     * this {@link VideobridgeExpireThread} has been started).
      */
-    private final WeakReference<Videobridge> videobridge;
+    private static final RecurringRunnableExecutor EXECUTOR
+        = new RecurringRunnableExecutor(
+            VideobridgeExpireThread.class.getSimpleName());
 
     /**
-     * Initializes a new <tt>VideobridgeExpireThread</tt> instance which is to
-     * expire the {@link Channel}s of a specific <tt>Videobridge</tt>.
+     * The executor used to expire the individual {@link AbstractEndpoint}s
+     * or {@link Conference}s.
+     */
+    private static final Executor EXPIRE_EXECUTOR
+        = ExecutorUtils.newCachedThreadPool(
+            true, VideobridgeExpireThread.class.getSimpleName() + "-channel");
+
+    /**
+     * The name of the property which specifies the interval in seconds at which
+     * a {@link VideobridgeExpireThread} instance should run.
+     */
+    public static final String EXPIRE_CHECK_SLEEP_SEC
+            = "org.jitsi.videobridge.EXPIRE_CHECK_SLEEP_SEC";
+    /**
+     * The default number of seconds of inactivity after which <tt>Channel</tt>s
+     * expire.
+     * NOTE(brian): move from Channel
+     */
+    public static final int DEFAULT_EXPIRE = 60;
+
+    /**
+     * The default value of the {@link #EXPIRE_CHECK_SLEEP_SEC} property.
+     */
+    private static final int EXPIRE_CHECK_SLEEP_SEC_DEFAULT =
+            DEFAULT_EXPIRE;
+
+    /**
+     * The {@link PeriodicRunnable} registered with {@link #EXECUTOR} which is
+     * to run the expire task for this {@link VideobridgeExpireThread} instance.
+     */
+    private PeriodicRunnable expireRunnable;
+
+    /**
+     * The {@link Videobridge} which has its {@link Conference}s expired by this
+     * instance.
+     */
+    private Videobridge videobridge;
+
+    /**
+     * Initializes a new {@link VideobridgeExpireThread} instance which is to
+     * expire the {@link Conference}s of a specific {@link Videobridge}.
      *
-     * @param videobridge the <tt>Videobridge</tt> which is to have its
-     * <tt>Channel</tt>s expired by the new instance
+     * @param videobridge the {@link Videobridge} which is to have its
+     * {@link Conference}s expired by the new instance.
      */
     public VideobridgeExpireThread(Videobridge videobridge)
     {
-        this.videobridge = new WeakReference<Videobridge>(videobridge);
-
-        setDaemon(true);
-        setName(getClass().getName());
+        this.videobridge = Objects.requireNonNull(videobridge);
     }
 
     /**
-     * Expires the {@link Channel}s of a specific <tt>Videobridge</tt> if they
+     * Starts this {@link VideobridgeExpireThread} in a specific
+     * {@link BundleContext}.
+     * @param bundleContext the <tt>BundleContext</tt> in which this
+     * {@link VideobridgeExpireThread} is to start.
+     */
+    void start(final BundleContext bundleContext)
+    {
+        ConfigurationService cfg
+                = ServiceUtils2.getService(
+                bundleContext,
+                ConfigurationService.class);
+
+        int expireCheckSleepSec
+                = (cfg == null)
+                    ? EXPIRE_CHECK_SLEEP_SEC_DEFAULT
+                    : cfg.getInt(
+                        EXPIRE_CHECK_SLEEP_SEC, EXPIRE_CHECK_SLEEP_SEC_DEFAULT);
+        logger.info(
+            "Starting with " + expireCheckSleepSec + " second interval.");
+
+        expireRunnable = new PeriodicRunnable(expireCheckSleepSec * 1000)
+        {
+            @Override
+            public void run()
+            {
+                super.run();
+
+                Videobridge videobridge
+                    = VideobridgeExpireThread.this.videobridge;
+                if (videobridge != null)
+                {
+                    expire(videobridge);
+                }
+
+                // The current implementation of the executor fails with a
+                // concurrent modification exception if we de-register from
+                // the thread running run(). So we can not de-register here
+                // if videobridge==null, and we will keep running until we get
+                // explicitly stop()ed, which is fine.
+            }
+        };
+        EXECUTOR.registerRecurringRunnable(expireRunnable);
+    }
+
+    /**
+     * Stops this {@link VideobridgeExpireThread}.
+     */
+    void stop(final BundleContext bundleContext)
+    {
+        logger.info("Stopping.");
+        if (expireRunnable != null)
+        {
+            EXECUTOR.deRegisterRecurringRunnable(expireRunnable);
+        }
+        expireRunnable = null;
+        videobridge = null;
+    }
+
+    /**
+     * Expires the {@link Conference}s and/or {@link Endpoint}s of a specific <tt>Videobridge</tt> if they
      * have been inactive for more than their advertised <tt>expire</tt> number
      * of seconds.
      *
@@ -69,162 +168,28 @@ class VideobridgeExpireThread
      */
     private void expire(Videobridge videobridge)
     {
+        logger.info("Running expire()");
         for (Conference conference : videobridge.getConferences())
         {
             // The Conferences will live an iteration more than the Contents.
-            Content[] contents = conference.getContents();
-
-            if (contents.length == 0)
+            if (conference.shouldExpire())
             {
-                if ((conference.getLastActivityTime()
-                            + 1000L * Channel.DEFAULT_EXPIRE)
-                        < System.currentTimeMillis())
-                {
-                    try
-                    {
-                        conference.expire();
-                    }
-                    catch (Throwable t)
-                    {
-                        logger.warn(
-                                "Failed to expire conference "
-                                    + conference.getID() + "!",
-                                t);
-                        if (t instanceof ThreadDeath)
-                            throw (ThreadDeath) t;
-                    }
-                }
+                logger.info("Conference "
+                        + conference.getID() + " should expire, expiring it");
+                EXPIRE_EXECUTOR.execute(
+                        () -> videobridge.expireConference(conference));
             }
             else
             {
-                for (Content content : conference.getContents())
+                for (AbstractEndpoint endpoint : conference.getEndpoints())
                 {
-                    /*
-                     * The Contents will live an iteration more than the
-                     * Channels.
-                     */
-                    Channel[] channels = content.getChannels();
-
-                    if (channels.length == 0)
+                    if (endpoint.shouldExpire())
                     {
-                        if ((content.getLastActivityTime()
-                                    + 1000L * Channel.DEFAULT_EXPIRE)
-                                < System.currentTimeMillis())
-                        {
-                            try
-                            {
-                                content.expire();
-                            }
-                            catch (Throwable t)
-                            {
-                                logger.warn(
-                                        "Failed to expire content "
-                                            + content.getName()
-                                            + " of conference "
-                                            + conference.getID() + "!",
-                                        t);
-                                if (t instanceof ThreadDeath)
-                                    throw (ThreadDeath) t;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        for (Channel channel : channels)
-                        {
-                            if ((channel.getLastActivityTime()
-                                        + 1000L * channel.getExpire())
-                                    < System.currentTimeMillis())
-                            {
-                                try
-                                {
-                                    channel.expire();
-                                }
-                                catch (Throwable t)
-                                {
-                                    logger.warn(
-                                            "Failed to expire channel "
-                                                + channel.getID()
-                                                + " of content "
-                                                + content.getName()
-                                                + " of conference "
-                                                + conference.getID() + "!",
-                                            t);
-                                    if (t instanceof ThreadDeath)
-                                        throw (ThreadDeath) t;
-                                }
-                            }
-                        }
+                        logger.info("Expiring endpoint " + endpoint.getID());
+                        EXPIRE_EXECUTOR.execute(endpoint::expire);
                     }
                 }
             }
         }
-    }
-
-    /**
-     * Runs the loop in the background which expires the {@link Channel}s of
-     * {@link #videobridge} if they have been inactive for more than their
-     * advertised <tt>expire</tt> number of seconds.
-     */
-    @Override
-    public void run()
-    {
-        long wakeup = -1;
-        final long sleep = Channel.DEFAULT_EXPIRE * 1000;
-
-        do
-        {
-            /*
-             * If the Videobridge of this instance is not referenced anymore,
-             * then it is time for this Thread to stop executing.
-             */
-            Videobridge videobridge = this.videobridge.get();
-
-            if (videobridge == null)
-                break;
-
-            // Run the command of this Thread scheduled with a fixed delay.
-            long now = System.currentTimeMillis();
-
-            if (wakeup != -1)
-            {
-                long slept = now - wakeup;
-
-                if (slept < sleep)
-                {
-                    boolean interrupted = false;
-
-                    try
-                    {
-                        Thread.sleep(sleep - slept);
-                    }
-                    catch (InterruptedException ie)
-                    {
-                        interrupted = true;
-                    }
-                    if (interrupted)
-                        Thread.currentThread().interrupt();
-
-                    continue;
-                }
-            }
-
-            wakeup = now;
-
-            try
-            {
-                expire(videobridge);
-            }
-            catch (Throwable t)
-            {
-                logger.error(
-                        "Failed to complete an iteration of automatic expiry of"
-                            + " channels, contents, and conferences!",
-                        t);
-                if (t instanceof ThreadDeath)
-                    throw (ThreadDeath) t;
-            }
-        }
-        while (true);
     }
 }

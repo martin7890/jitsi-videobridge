@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,8 +43,8 @@ public class VideobridgeBundleActivator
      * Initializes and starts a new <tt>Videobridge</tt> instance and registers
      * it as an OSGi service in the specified <tt>bundleContext</tt>.
      *
-     * @param the <tt>BundleContext</tt> in which the <tt>Videobridge</tt> OSGi
-     * bundle is to start
+     * @param bundleContext the <tt>BundleContext</tt> in which the
+     * <tt>Videobridge</tt> OSGi bundle is to start
      */
     @Override
     public void start(BundleContext bundleContext)
@@ -79,8 +79,8 @@ public class VideobridgeBundleActivator
      * <tt>BundleContext</tt> if such an instance has been registered and
      * started.
      *
-     * @param the <tt>BundleContext</tt> in which the <tt>Videobridge</tt> OSGi
-     * bundle is to stop
+     * @param bundleContext the <tt>BundleContext</tt> in which the
+     * <tt>Videobridge</tt> OSGi bundle is to stop
      */
     @Override
     public void stop(BundleContext bundleContext)

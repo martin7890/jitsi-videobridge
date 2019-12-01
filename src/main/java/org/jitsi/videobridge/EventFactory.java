@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ package org.jitsi.videobridge;
 import java.util.*;
 
 import org.ice4j.ice.*;
-import org.jitsi.videobridge.eventadmin.*;
+import org.jitsi.eventadmin.*;
 
 /**
  * A utility class with static methods which initialize <tt>Event</tt> instances
@@ -28,19 +28,8 @@ import org.jitsi.videobridge.eventadmin.*;
  * @author George Politis
  */
 public class EventFactory
+    extends AbstractEventFactory
 {
-    /**
-     * The name of the topic of a "channel created" event.
-     */
-    public static final String CHANNEL_CREATED_TOPIC
-        = "org/jitsi/videobridge/Channel/CREATED";
-
-    /**
-     * The name of the topic of a "channel expired" event.
-     */
-    public static final String CHANNEL_EXPIRED_TOPIC
-        = "org/jitsi/videobridge/Channel/EXPIRED";
-
     /**
      * The name of the topic of a "conference created" event.
      */
@@ -54,92 +43,43 @@ public class EventFactory
         = "org/jitsi/videobridge/Conference/EXPIRED";
 
     /**
-     * The name of the topic of a "content created" event.
-     */
-    public static final String CONTENT_CREATED_TOPIC
-        = "org/jitsi/videobridge/Content/CREATED";
-
-    /**
-     * The name of the topic of a "content expired" event.
-     */
-    public static final String CONTENT_EXPIRED_TOPIC
-        = "org/jitsi/videobridge/Content/EXPIRED";
-
-    /**
      * The name of the topic of a "endpoint created" event.
      */
     public static final String ENDPOINT_CREATED_TOPIC
         = "org/jitsi/videobridge/Endpoint/CREATED";
 
     /**
-     * The name of the topic of a "endpoint display name changed" event.
+     * The name of the topic of a "endpoint expired" event.
      */
-    public static final String ENDPOINT_DISPLAY_NAME_CHANGED_TOPIC
-        = "org/jitsi/videobridge/Endpoint/NAME_CHANGED";
-
-    public static final String EVENT_SOURCE = "event.source";
+    public static final String ENDPOINT_EXPIRED_TOPIC
+        = "org/jitsi/videobridge/Endpoint/EXPIRED";
 
     /**
-     * The name of the topic of a "stream started" event.
+     * The name of the topic of a "message transport ready" event triggered on
+     * an endpoint instance when it's message transport connection is ready for
+     * sending/receiving data.
      */
-    public static final String STREAM_STARTED_TOPIC
-        = "org/jitsi/videobridge/Endpoint/STREAM_STARTED";
+    public static final String MSG_TRANSPORT_READY_TOPIC
+        = "org/jitsi/videobridge/Endpoint/MSG_TRANSPORT_READY_TOPIC";
 
-    /**
-     * The name of the topic of a "transport channel created" event.
-     */
-    public static final String TRANSPORT_CHANNEL_ADDED_TOPIC
-        = "org/jitsi/videobridge/IceUdpTransportManager/"
-            + "TRANSPORT_CHANNEL_ADDED";
-
-    /**
-     * The name of the topic of a "transport channel removed" event.
-     */
-    public static final String TRANSPORT_CHANNEL_REMOVED_TOPIC
-        = "org/jitsi/videobridge/IceUdpTransportManager/" +
-        "TRANSPORT_CHANNEL_REMOVED";
     /**
      * The name of the topic of a "transport connected" event.
      */
     public static final String TRANSPORT_CONNECTED_TOPIC
-        = "org/jitsi/videobridge/IceUdpTransportManager/"
+        = "org/jitsi/videobridge/IceTransport/"
             + "TRANSPORT_CHANNEL_CONNECTED";
 
     /**
      * The name of the topic of a "transport created" event.
      */
     public static final String TRANSPORT_CREATED_TOPIC
-        = "org/jitsi/videobridge/IceUdpTransportManager/CREATED";
+        = "org/jitsi/videobridge/IceTransport/CREATED";
 
     /**
      * The name of the topic of a "transport state changed" event.
      */
     public static final String TRANSPORT_STATE_CHANGED_TOPIC
-        = "org/jitsi/videobridge/IceUdpTransportManager/TRANSPORT_CHANGED";
-
-    /**
-     * Creates a new "channel created" <tt>Event</tt>, which indicates the
-     * creation of a new COLIBRI channel.
-     * @param channel the newly created COLIBRI channel.
-     *
-     * @return the <tt>Event</tt> which was created.
-     */
-    public static Event channelCreated(Channel channel)
-    {
-        return new Event(CHANNEL_CREATED_TOPIC, makeProperties(channel));
-    }
-
-    /**
-     * Creates a new "channel expired" <tt>Event</tt>, which indicates the
-     * expiry of a COLIBRI channel.
-     * @param channel the expired COLIBRI channel.
-     *
-     * @return the <tt>Event</tt> which was created.
-     */
-    public static Event channelExpired(Channel channel)
-    {
-        return new Event(CHANNEL_EXPIRED_TOPIC, makeProperties(channel));
-    }
+        = "org/jitsi/videobridge/IceTransport/TRANSPORT_CHANGED";
 
     /**
      * Creates a new "conference created" <tt>Event</tt>, which indicates the
@@ -166,100 +106,45 @@ public class EventFactory
     }
 
     /**
-     * Creates a new "content created" <tt>Event</tt>, which indicates the
-     * creation of a new COLIBRI content.
-     * @param content the newly created COLIBRI content.
-     *
-     * @return the <tt>Event</tt> which was created.
-     */
-    public static Event contentCreated(Content content)
-    {
-        return new Event(CONTENT_CREATED_TOPIC, makeProperties(content));
-    }
-
-    /**
-     * Creates a new "content expired" <tt>Event</tt>, which indicates the
-     * expiry of a COLIBRI content.
-     * @param content the expired COLIBRI content.
-     *
-     * @return the <tt>Event</tt> which was created.
-     */
-    public static Event contentExpired(Content content)
-    {
-        return new Event(CONTENT_EXPIRED_TOPIC, makeProperties(content));
-    }
-
-    /**
      * Creates a new "endpoint created" <tt>Event</tt>, which indicates that
      * a COLIBRI endpoint was created.
      * @param endpoint the newly created endpoint.
      *
      * @return the <tt>Event</tt> which was created.
      */
-    public static Event endpointCreated(Endpoint endpoint)
+    public static Event endpointCreated(AbstractEndpoint endpoint)
     {
         return new Event(ENDPOINT_CREATED_TOPIC, makeProperties(endpoint));
     }
 
     /**
-     * Creates a new "endpoint display name changed" <tt>Event</tt>, which
-     * conference ID to the JID of the associated MUC.
-     *
-     * @param endpoint the changed endpoint.
+     * Creates a new "endpoint expired" <tt>Event</tt>, which indicates that
+     * a COLIBRI endpoint was expired.
+     * @param endpoint the just expired endpoint.
      *
      * @return the <tt>Event</tt> which was created.
      */
-    public static Event endpointDisplayNameChanged(Endpoint endpoint)
+    public static Event endpointExpired(AbstractEndpoint endpoint)
     {
-        return
-            new Event(
-                    ENDPOINT_DISPLAY_NAME_CHANGED_TOPIC,
-                    makeProperties(endpoint));
-    }
-
-    protected static Dictionary makeProperties(Object source)
-    {
-        Dictionary properties = new Hashtable(1);
-
-        properties.put(EVENT_SOURCE, source);
-        return properties;
-    }
-
-    public static Event streamStarted(RtpChannel rtpChannel)
-    {
-        return new Event(STREAM_STARTED_TOPIC, makeProperties(rtpChannel));
+        return new Event(ENDPOINT_EXPIRED_TOPIC, makeProperties(endpoint));
     }
 
     /**
-     * Creates a new "transport channel added" <tt>Event</tt>, which indicates
-     * that a COLIBRI channel was added to a Jitsi Videobridge TransportManager.
-     * @param channel the added COLIBRI channel.
+     * Creates a new "message transport ready" <tt>Event</tt>, which means that
+     * the endpoint passed in {@link #EVENT_SOURCE} property has now it's
+     * message transport connection established and ready for sending/receiving
+     * data.
+     *
+     * @param endpoint the endpoint for which the message transport is now ready
      *
      * @return the <tt>Event</tt> which was created.
      */
-    public static Event transportChannelAdded(
-            Channel channel)
+    public static Event endpointMessageTransportReady(AbstractEndpoint endpoint)
     {
-        return
-            new Event(
-                    TRANSPORT_CHANNEL_ADDED_TOPIC,
-                    makeProperties(channel));
-    }
+        Dictionary<String, Object> properties = new Hashtable<>(1);
 
-    /**
-     * Creates a new "transport channel removed" <tt>Event</tt>, which indicates
-     * that a COLIBRI channel was removed from a Jitsi Videobridge
-     * TransportManager.
-     * @param channel the removed COLIBRI channel.
-     *
-     * @return the <tt>Event</tt> which was created.
-     */
-    public static Event transportChannelRemoved(Channel channel)
-    {
-        return
-            new Event(
-                    TRANSPORT_CHANNEL_REMOVED_TOPIC,
-                    makeProperties(channel));
+        properties.put(EVENT_SOURCE, endpoint);
+        return new Event(MSG_TRANSPORT_READY_TOPIC, properties);
     }
 
     /**
@@ -271,7 +156,7 @@ public class EventFactory
      * @return the <tt>Event</tt> which was created.
      */
     public static Event transportConnected(
-            IceUdpTransportManager transportManager)
+            IceTransport transportManager)
     {
         return
             new Event(
@@ -287,7 +172,7 @@ public class EventFactory
      * @return the <tt>Event</tt> which was created.
      */
     public static Event transportCreated(
-            IceUdpTransportManager transportManager)
+            IceTransport transportManager)
     {
         return
             new Event(
@@ -304,11 +189,11 @@ public class EventFactory
      * @return the <tt>Event</tt> which was created.
      */
     public static Event transportStateChanged(
-            IceUdpTransportManager transportManager,
+            IceTransport transportManager,
             IceProcessingState oldState,
             IceProcessingState newState)
     {
-        Dictionary properties = new Hashtable(3);
+        Dictionary<String, Object> properties = new Hashtable<>(3);
 
         properties.put(EVENT_SOURCE, transportManager);
         properties.put("oldState", oldState);

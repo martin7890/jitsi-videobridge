@@ -81,7 +81,7 @@
 
     <!-- Builds the debian package. -->
     <target name="make-deb"
-            depends="make,dpkg-build-warning,deb-bump-version">
+            depends="copy-runtime-dependencies-from-maven,make,dpkg-build-warning,deb-bump-version">
 
         <copy todir="${debian.dir}" includeEmptyDirs="Yes">
             <fileset dir="resources/install/debian">
@@ -95,6 +95,7 @@
         <copy todir="${debian.dir}/usr/share/jitsi-videobridge/lib"
               overwrite="true" includeEmptyDirs="No">
             <fileset dir="lib/">
+                <exclude name="logging.properties"/>
                 <exclude name="native/macos*/*"/>
                 <exclude name="native/windows*/*"/>
                 <exclude name="native/${exclude-dir}/*"/>
@@ -103,11 +104,42 @@
         <copy file="jitsi-videobridge.jar"
               todir="${debian.dir}/usr/share/jitsi-videobridge"
               overwrite="true"/>
+        <copy file="lib/logging.properties"
+              todir="${debian.dir}/etc/jitsi/videobridge"
+              overwrite="true"/>
         <copy file="resources/install/${include-dir}/jvb.sh"
               todir="${debian.dir}/usr/share/jitsi-videobridge"
               overwrite="true"/>
         <chmod file="${debian.dir}/usr/share/jitsi-videobridge/jvb.sh"
                perm="755"/>
+        <copy file="resources/graceful_shutdown.sh"
+              todir="${debian.dir}/usr/share/jitsi-videobridge"
+              overwrite="true"/>
+        <chmod file="${debian.dir}/usr/share/jitsi-videobridge/graceful_shutdown.sh"
+               perm="755"/>
+        <copy file="resources/collect-dump-logs.sh"
+              todir="${debian.dir}/usr/share/jitsi-videobridge"
+              overwrite="true"/>
+        <chmod file="${debian.dir}/usr/share/jitsi-videobridge/collect-dump-logs.sh"
+               perm="755"/>
+
+        <!-- callstats-java-sdk -->
+        <copy file="config/log4j2.xml"
+              todir="${debian.dir}/etc/jitsi/videobridge"
+              overwrite="true"/>
+        <replace file="${debian.dir}/etc/jitsi/videobridge/log4j2.xml"
+                 token="logs">
+            <replacevalue>/var/log/jitsi</replacevalue>
+        </replace>
+        <copy file="config/callstats-java-sdk.properties"
+              todir="${debian.dir}/etc/jitsi/videobridge"
+              overwrite="true"/>
+        <copy file="config/logrotate"
+              tofile="${debian.dir}/etc/logrotate.d/jitsi-videobridge"
+              overwrite="true"/>
+        <copy file="config/20-jvb-udp-buffers.conf"
+              todir="${debian.dir}/etc/sysctl.d/"
+              overwrite="true"/>
 
         <!-- creating a debian archive file
         <tar destfile="jitsi-videobridge_${label}-1.debian.tar.gz"
@@ -266,8 +298,6 @@ endif
         <symlink resource="/usr/share/java/jetty8-servlet.jar"
                  link="lib"/>
         <symlink resource="/usr/share/java/jetty8-rewrite.jar"
-                 link="lib"/>
-        <symlink resource="/usr/share/java/sigar.jar"
                  link="lib"/>
 
         <mkdir dir="lib/src/jitsi-android-osgi/classes"/>

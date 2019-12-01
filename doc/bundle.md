@@ -5,7 +5,15 @@ used with the WebRTC "bundle" -- "m=" lines from the same bundle group go to
 COLIBRI channels in the same 'channel-bundle'.
 
 Received packets are demultiplexed between the channels in a channel-bundle
-based on the rules defined for WebRTC. See 
+based on the rules defined for WebRTC. Namely for RTP packets the Payload Type is used, while for RTCP packets the Packet Sender SSRC is used.
+
+This list of SSRCs for a given channel, used to decide whether to accept an RTCP packet or not, is populated in two ways:
+* Through COLIBRI (with "source" elements)
+* When RTP packets with a new SSRC are received
+
+This means that the SSRCs used by receive-only endpoints in RTCP packets need to be signalled to videobridge using COLIBRI. If they are not, RTCP coming from these endpoints will be dropped.
+
+See 
 [http://tools.ietf.org/html/draft-ietf-rtcweb-rtp-usage]() and 
 [https://tools.ietf.org/html/draft-holmberg-mmusic-sdp-bundle-negotiation]()
 
@@ -91,7 +99,7 @@ Transport elements are not included for bundled channels, but are instead placed
 </conference>
 ```
 
-## Adding remote candidates for a signle channel-bundle:
+## Adding remote candidates for a single channel-bundle:
 Transport elements carrying the candidates are placed in "channel-bundle" child elements of "conference".
 ```
 <conference xmlns=" http://jitsi.org/protocol/colibri" id="16c43f4c4d3b658">
@@ -107,7 +115,7 @@ Transport elements carrying the candidates are placed in "channel-bundle" child 
   <channel-bundle id="52865510">
     <transport xmlns="urn:xmpp:jingle:transports:ice-udp:1">
       <rtcp-mux/>
-        <candidate type="host" protocol="udp" id="id97de092a" ip="10.0.0.250" component="1" port="49312" foundation="3338013213" generation="0" priority="2122260223" network="1"/>
+      <candidate type="host" protocol="udp" id="id97de092a" ip="10.0.0.250" component="1" port="49312" foundation="3338013213" generation="0" priority="2122260223" network="1"/>
     </transport>
   </channel-bundle>
 </conference>

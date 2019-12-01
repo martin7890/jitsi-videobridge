@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,11 @@ package org.jitsi.videobridge.rest;
 
 import java.util.*;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
-
-import org.jitsi.service.neomedia.*;
+import org.jetbrains.annotations.*;
 import org.jitsi.videobridge.stats.*;
+import org.jitsi.xmpp.extensions.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 import org.json.simple.*;
 
 /**
@@ -32,7 +31,7 @@ import org.json.simple.*;
  * @author Lyubomir Marinov
  */
 @SuppressWarnings("unchecked")
-final class JSONSerializer
+public final class JSONSerializer
 {
     /**
      * The name of the JSON pair which specifies the value of the
@@ -48,6 +47,13 @@ final class JSONSerializer
      */
     static final String CHANNEL_BUNDLES
         = ColibriConferenceIQ.ChannelBundle.ELEMENT_NAME + "s";
+
+    /**
+     * The name of the JSON pair which specifies the value of the
+     * <tt>endpoints</tt> property of <tt>ColibriConferenceIQ</tt>.
+     */
+    static final String ENDPOINTS
+        = ColibriConferenceIQ.Endpoint.ELEMENT_NAME + "s";
 
     /**
      * The name of the JSON pair which specifies the value of the
@@ -87,6 +93,13 @@ final class JSONSerializer
 
     /**
      * The name of the JSON pair which specifies the value of the
+     * <tt>rtcp-fb</tt> property of <tt>ColibriConferenceIQ.Channel</tt>.
+     */
+    static final String RTCP_FBS
+            = RtcpFbPacketExtension.ELEMENT_NAME + "s";
+
+    /**
+     * The name of the JSON pair which specifies the value of the
      * <tt>sctpConnections</tt> property of
      * <tt>ColibriConferenceIQ.Content</tt>.
      */
@@ -122,6 +135,13 @@ final class JSONSerializer
 
     /**
      * The name of the JSON pair which specifies the value of the
+     *  <tt>webSockets</tt> property of <tt>WebSocketPacketExtension</tt>.
+     */
+    static final String WEBSOCKET_LIST
+            = WebSocketPacketExtension.ELEMENT_NAME + "s";
+
+    /**
+     * The name of the JSON pair which specifies the value of the
      * <tt>namespace</tt> property of <tt>IceUdpTransportPacketExtension</tt>.
      */
     static final String XMLNS = "xmlns";
@@ -146,7 +166,7 @@ final class JSONSerializer
             /*
              * The JSON.simple library that is in use at the time of this
              * writing will fail to encode Enum values as JSON strings so
-             * convert the Enum value to a Java String. 
+             * convert the Enum value to a Java String.
              */
             if (value instanceof Enum)
                 value = value.toString();
@@ -204,11 +224,11 @@ final class JSONSerializer
         }
         else
         {
-            MediaDirection direction = channel.getDirection();
+            String direction = channel.getDirection();
             Integer lastN = channel.getLastN();
             List<PayloadTypePacketExtension> payloadTypes
                 = channel.getPayloadTypes();
-            Integer receivingSimulcastLayer
+            Integer receivingSimulcastStream
                 = channel.getReceivingSimulcastLayer();
             RTPLevelRelayType rtpLevelRelayType
                 = channel.getRTPLevelRelayType();
@@ -224,11 +244,11 @@ final class JSONSerializer
                 /*
                  * The JSON.simple library that is in use at the time of this
                  * writing will fail to encode Enum values as JSON strings so
-                 * convert the Enum value to a Java String. 
+                 * convert the Enum value to a Java String.
                  */
                 jsonObject.put(
                         ColibriConferenceIQ.Channel.DIRECTION_ATTR_NAME,
-                        direction.toString());
+                        direction);
             }
             // lastN
             if (lastN != null)
@@ -242,7 +262,7 @@ final class JSONSerializer
             {
                 jsonObject.put(
                         ColibriConferenceIQ.Channel.RECEIVING_SIMULCAST_LAYER,
-                        receivingSimulcastLayer);
+                        receivingSimulcastStream);
             }
             // payloadTypes
             if ((payloadTypes != null) && !payloadTypes.isEmpty())
@@ -257,7 +277,7 @@ final class JSONSerializer
                 /*
                  * The JSON.simple library that is in use at the time of this
                  * writing will fail to encode Enum values as JSON strings so
-                 * convert the Enum value to a Java String. 
+                 * convert the Enum value to a Java String.
                  */
                 jsonObject.put(
                         ColibriConferenceIQ.Channel
@@ -315,6 +335,47 @@ final class JSONSerializer
         return jsonObject;
     }
 
+    public static JSONObject serializeEndpoint(
+            ColibriConferenceIQ.Endpoint endpoint)
+    {
+        JSONObject jsonObject;
+
+        if (endpoint == null)
+        {
+            jsonObject = null;
+        }
+        else
+        {
+            String id = endpoint.getId();
+            String statsId = endpoint.getStatsId();
+            String displayName = endpoint.getDisplayName();
+
+            jsonObject = new JSONObject();
+            // id
+            if (id != null)
+            {
+                jsonObject.put(
+                    ColibriConferenceIQ.Endpoint.ID_ATTR_NAME,
+                    id);
+            }
+            // statsId
+            if (statsId != null)
+            {
+                jsonObject.put(
+                    ColibriConferenceIQ.Endpoint.STATS_ID_ATTR_NAME,
+                    statsId);
+            }
+            // displayName
+            if (displayName != null)
+            {
+                jsonObject.put(
+                        ColibriConferenceIQ.Endpoint.DISPLAYNAME_ATTR_NAME,
+                    displayName);
+            }
+        }
+        return jsonObject;
+    }
+
     public static JSONArray serializeChannelBundles(
             Collection<ColibriConferenceIQ.ChannelBundle> channelBundles)
     {
@@ -331,6 +392,27 @@ final class JSONSerializer
                     : channelBundles)
             {
                 jsonArray.add(serializeChannelBundle(channelBundle));
+            }
+        }
+        return jsonArray;
+    }
+
+    public static JSONArray serializeEndpoints(
+            Collection<ColibriConferenceIQ.Endpoint> endpoints)
+    {
+        JSONArray jsonArray;
+
+        if (endpoints == null)
+        {
+            jsonArray = null;
+        }
+        else
+        {
+            jsonArray = new JSONArray();
+            for (ColibriConferenceIQ.Endpoint endpoint
+                    : endpoints)
+            {
+                jsonArray.add(serializeEndpoint(endpoint));
             }
         }
         return jsonArray;
@@ -436,7 +518,8 @@ final class JSONSerializer
                 = conference.getContents();
             List<ColibriConferenceIQ.ChannelBundle> channelBundles
                 = conference.getChannelBundles();
-            ColibriConferenceIQ.Recording recording = conference.getRecording();
+            List<ColibriConferenceIQ.Endpoint> endpoints
+                = conference.getEndpoints();
             boolean isGracefulShutdown = conference.isGracefulShutdown();
 
             jsonObject = new JSONObject();
@@ -453,11 +536,12 @@ final class JSONSerializer
                         CHANNEL_BUNDLES,
                         serializeChannelBundles(channelBundles));
             }
-            // recording
-            if (recording != null)
+            // endpoints
+            if ((endpoints != null) && !endpoints.isEmpty())
             {
-                jsonObject.put(ColibriConferenceIQ.Recording.ELEMENT_NAME,
-                               serializeRecording(recording));
+                jsonObject.put(
+                        ENDPOINTS,
+                        serializeEndpoints(endpoints));
             }
             // shutdown
             if (isGracefulShutdown)
@@ -620,6 +704,42 @@ final class JSONSerializer
         return parametersJSONObject;
     }
 
+    public static JSONArray serializeRtcpFbs(
+            @NotNull Collection<RtcpFbPacketExtension> rtcpFbs)
+    {
+        JSONArray rtcpFbsJSON = new JSONArray();
+        /*
+         * A rtcp-fb is an JSONObject with type / subtype data.
+         * "rtcp-fbs": [ {
+                "type": "ccm",
+                "subtype": "fir"
+              }, {
+                "type": "nack"
+              }, {
+                "type": "goog-remb"
+              } ]
+         */
+        for (RtcpFbPacketExtension ext : rtcpFbs)
+        {
+            String type = ext.getFeedbackType();
+            String subtype = ext.getFeedbackSubtype();
+
+            if (type != null)
+            {
+                JSONObject rtcpFbJSON = new JSONObject();
+                rtcpFbJSON.put(RtcpFbPacketExtension.TYPE_ATTR_NAME, type);
+                if (subtype != null)
+                {
+                    rtcpFbJSON.put(
+                            RtcpFbPacketExtension.SUBTYPE_ATTR_NAME,
+                            subtype);
+                }
+                rtcpFbsJSON.add(rtcpFbJSON);
+            }
+        }
+        return rtcpFbsJSON;
+    }
+
     public static JSONObject serializePayloadType(
             PayloadTypePacketExtension payloadType)
     {
@@ -646,32 +766,17 @@ final class JSONSerializer
                         PARAMETERS,
                         serializeParameters(parameters));
             }
+            final List<RtcpFbPacketExtension> rtcpFeedbackTypeList =
+                    payloadType.getRtcpFeedbackTypeList();
+            if ((rtcpFeedbackTypeList != null) &&
+                    !rtcpFeedbackTypeList.isEmpty())
+            {
+                payloadTypeJSONObject.put(
+                        RTCP_FBS,
+                        serializeRtcpFbs(rtcpFeedbackTypeList));
+            }
         }
         return payloadTypeJSONObject;
-    }
-
-    public static JSONObject serializeRecording(
-            ColibriConferenceIQ.Recording recording)
-    {
-        JSONObject jsonObject = new JSONObject();
-        jsonObject.put(ColibriConferenceIQ.Recording.STATE_ATTR_NAME,
-                       recording.getState());
-
-        String token = recording.getToken();
-        if (token != null)
-        {
-            jsonObject.put(ColibriConferenceIQ.Recording.TOKEN_ATTR_NAME,
-                           token);
-        }
-
-        String directory = recording.getDirectory();
-        if (directory != null)
-        {
-            jsonObject.put(ColibriConferenceIQ.Recording.DIRECTORY_ATTR_NAME,
-                    directory);
-        }
-
-        return jsonObject;
     }
 
     public static JSONArray serializePayloadTypes(
@@ -848,6 +953,9 @@ final class JSONSerializer
                         DtlsFingerprintPacketExtension.class);
             List<CandidatePacketExtension> candidateList
                 = transport.getCandidateList();
+            List<WebSocketPacketExtension> webSocketList
+                = transport.getChildExtensionsOfType(
+                        WebSocketPacketExtension.class);
             RemoteCandidatePacketExtension remoteCandidate
                 = transport.getRemoteCandidate();
             boolean rtcpMux = transport.isRtcpMux();
@@ -879,6 +987,12 @@ final class JSONSerializer
                         remoteCandidate.getElementName(),
                         serializeCandidate(remoteCandidate));
             }
+            if ( (webSocketList != null) && (!webSocketList.isEmpty()) )
+            {
+                jsonObject.put(
+                        WEBSOCKET_LIST,
+                        serializeWebSockets(webSocketList));
+            }
             // rtcpMux
             if (rtcpMux)
             {
@@ -888,6 +1002,30 @@ final class JSONSerializer
             }
         }
         return jsonObject;
+    }
+
+    private static String serializeWebSocket(
+             WebSocketPacketExtension webSocket)
+    {
+        return webSocket.getUrl();
+    }
+
+    private static JSONArray serializeWebSockets(
+             List<WebSocketPacketExtension> webSocketList)
+    {
+        JSONArray webSocketsJSONArray;
+
+        if (webSocketList == null)
+        {
+            webSocketsJSONArray = null;
+        }
+        else
+        {
+            webSocketsJSONArray = new JSONArray();
+            for (WebSocketPacketExtension webSocket : webSocketList)
+                webSocketsJSONArray.add(serializeWebSocket(webSocket));
+        }
+        return webSocketsJSONArray;
     }
 
     /** Prevents the initialization of new <tt>JSONSerializer</tt> instances. */

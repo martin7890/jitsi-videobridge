@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,9 @@
  */
 package org.jitsi.videobridge;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import org.jitsi.service.neomedia.*;
+import org.jitsi.utils.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jxmpp.jid.*;
 
 /**
  * FIXME merge with utility used by the focus
@@ -35,7 +36,7 @@ public class ColibriUtilities
      * @return {@link ColibriConferenceIQ} with audio content and empty channel
      *         IQ.
      */
-    public static ColibriConferenceIQ createConferenceIq(String focusJid)
+    public static ColibriConferenceIQ createConferenceIq(Jid focusJid)
     {
         ColibriConferenceIQ confIq = new ColibriConferenceIQ();
 
@@ -44,8 +45,11 @@ public class ColibriUtilities
         ColibriConferenceIQ.Content audioContent
             = new ColibriConferenceIQ.Content(MediaType.AUDIO.toString());
 
+        String endpointId = "dummy_ep_id";
         ColibriConferenceIQ.Channel channel
             = new ColibriConferenceIQ.Channel();
+        channel.setEndpoint(endpointId);
+        channel.setChannelBundleId(endpointId);
 
         audioContent.addChannel(channel);
 

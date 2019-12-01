@@ -14,6 +14,9 @@
 #   "-t"("25" by default) number of second we we for the bridge to shutdown
 #       gracefully after conference count drops to 0
 #   "-s"(disabled by default) enable silent mode - no info output
+#
+#   NOTE: script depends on the tool jq, used to parse json
+#
 
 # Initialize arguments
 hostUrl="http://localhost:8080"
@@ -40,27 +43,27 @@ while getopts "p:h:t:s" opt; do
 done
 shift "$((OPTIND-1))"
 
+# Try the pid file, if no pid was provided as an argument.
+# for systemd we use different pid file in a subfolder
+if [ "$pid" = "" ] ;then
+    if [ -f /var/run/jitsi-videobridge.pid ]; then
+        pid=`cat /var/run/jitsi-videobridge.pid`
+    else
+        pid=`cat /var/run/jitsi-videobridge/jitsi-videobridge.pid`
+    fi
+fi
+
 #Check if PID is a number
 re='^[0-9]+$'
 if ! [[ $pid =~ $re ]] ; then
    echo "error: PID is not a number" >&2; exit 1
 fi
 
-# Function parses given text in JSON format and extracts given parameter value
-# First argument is the name of JSON parameter to be extracted, the second
-# argument is JSON text to be parsed.
-function jsonval {
-	json=$2
-	prop=$1
-    temp=`echo $json | sed 's/\\\\\//\//g' | sed 's/[{}]//g' | awk -v k="text" '{n=split($0,a,","); for (i=1; i<=n; i++) print a[i]}' | sed 's/\"\:\"/\|/g' | sed 's/[\,]/ /g' | sed 's/\"//g' | grep -w $prop`
-    echo ${temp##*|}
-}
-
 # Returns conference count by calling JVB REST statistics API and extracting
 # conference count from JSON stats text returned.
 function getConferenceCount {
-	stats=$(curl -s "$hostUrl/colibri/stats")
-	echo `jsonval "conferences" $stats`
+    # Total number of conferences minus the empty conferences
+    curl -s "$hostUrl/colibri/stats"| jq '.conferences - .conference_sizes[0]'
 }
 
 # Prints info messages
@@ -81,7 +84,7 @@ if [ "$shutdownStatus" == "200" ]
 then
 	printInfo "Graceful shutdown started"
 	confCount=`getConferenceCount`
-	while [ $confCount -gt 0 ] ; do
+	while [[ $confCount -gt 0 ]] ; do
 		printInfo "There are still $confCount conferences"
 		sleep 10
 		confCount=`getConferenceCount`
@@ -97,13 +100,7 @@ then
 		then
 			printError "Bridge did not exit after $timeout sec - killing $pid"
 			kill $pid
-		else
-			printInfo "Bridge shutdown OK"
-			exit 0
 		fi
-	else
-		printInfo "Bridge shutdown OK"
-		exit 0
 	fi
 	# check for 3 seconds if we managed to kill
 	for I in 1 2 3
@@ -120,10 +117,12 @@ then
 		kill -9 $pid
 		if ps -p $pid > /dev/null 2>&1
 		then
-			printError "Failed to force kill $pid"
+			printError "Failed to force kill $pid, giving up."
 			exit 1
 		fi
 	fi
+    rm -f /var/run/jitsi-videobridge.pid
+    rm -f /var/run/jitsi-videobridge/jitsi-videobridge.pid
 	printInfo "Bridge shutdown OK"
 	exit 0
 else

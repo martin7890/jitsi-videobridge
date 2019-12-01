@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,11 @@
 package org.jitsi.videobridge.stats;
 
 import java.util.*;
+import java.util.concurrent.atomic.*;
 import java.util.concurrent.locks.*;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
+import org.jitsi.utils.logging2.*;
+import org.jitsi.xmpp.extensions.colibri.*;
 
 /**
  * Abstract class that defines common interface for a collection of statistics.
@@ -29,11 +31,18 @@ import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
 public abstract class Statistics
 {
     /**
+     * The {@link Logger} used by the {@link Endpoint} class to print debug
+     * information.
+     */
+    private static final Logger logger = new LoggerImpl(Statistics.class.getName());
+
+    /**
      * Formats statistics in <tt>ColibriStatsExtension</tt> object
      * @param statistics the statistics instance
      * @return the <tt>ColibriStatsExtension</tt> instance.
      */
-    public static ColibriStatsExtension toXMPP(Statistics statistics)
+    public static ColibriStatsExtension toXmppExtensionElement(
+            Statistics statistics)
     {
         ColibriStatsExtension ext = new ColibriStatsExtension();
 
@@ -43,6 +52,22 @@ public abstract class Statistics
                     new ColibriStatsExtension.Stat(e.getKey(), e.getValue()));
         }
         return ext;
+    }
+
+    /**
+     * Formats statistics in <tt>ColibriStatsIQ</tt> object
+     * @param statistics the statistics instance
+     * @return the <tt>ColibriStatsIQ</tt> instance.
+     */
+    public static ColibriStatsIQ toXmppIq(Statistics statistics)
+    {
+        ColibriStatsIQ iq = new ColibriStatsIQ();
+        for (Map.Entry<String,Object> e : statistics.getStats().entrySet())
+        {
+            iq.addStat(
+                    new ColibriStatsExtension.Stat(e.getKey(), e.getValue()));
+        }
+        return iq;
     }
 
     /**
@@ -56,7 +81,7 @@ public abstract class Statistics
     /**
      * Map of the names of the statistics and their values.
      */
-    private final Map<String,Object> stats = new HashMap<String,Object>();
+    private final Map<String,Object> stats = new HashMap<>();
 
     /**
      * Generates/updates the statistics represented by this instance.
@@ -87,6 +112,136 @@ public abstract class Statistics
     }
 
     /**
+     * Gets the value of a specific piece of statistic as a {@code double}
+     * value.
+     *
+     * @param stat the name of the piece of statistics to return
+     * @return the value of {@code stat} as a {@code double} value
+     */
+    public double getStatAsDouble(String stat)
+    {
+        Object o = getStat(stat);
+        double d;
+        double defaultValue = 0.0d;
+
+        if (o == null)
+        {
+            d = defaultValue;
+        }
+        else if (o instanceof Number)
+        {
+            d = ((Number) o).floatValue();
+        }
+        else
+        {
+            String s = o.toString();
+
+            if (s == null || s.length() == 0)
+            {
+                d = defaultValue;
+            }
+            else
+            {
+                try
+                {
+                    d = Double.parseDouble(s);
+                }
+                catch (NumberFormatException nfe)
+                {
+                    d = defaultValue;
+                }
+            }
+        }
+        return d;
+    }
+
+    /**
+     * Gets the value of a specific piece of statistic as a {@code float} value.
+     *
+     * @param stat the name of the piece of statistics to return
+     * @return the value of {@code stat} as a {@code float} value
+     */
+    public float getStatAsFloat(String stat)
+    {
+        Object o = getStat(stat);
+        float f;
+        float defaultValue = 0.0f;
+
+        if (o == null)
+        {
+            f = defaultValue;
+        }
+        else if (o instanceof Number)
+        {
+            f = ((Number) o).floatValue();
+        }
+        else
+        {
+            String s = o.toString();
+
+            if (s == null || s.length() == 0)
+            {
+                f = defaultValue;
+            }
+            else
+            {
+                try
+                {
+                    f = Float.parseFloat(s);
+                }
+                catch (NumberFormatException nfe)
+                {
+                    f = defaultValue;
+                }
+            }
+        }
+        return f;
+    }
+
+    /**
+     * Gets the value of a specific piece of statistic as an {@code int} value.
+     *
+     * @param stat the name of the piece of statistics to return
+     * @return the value of {@code stat} as an {@code int} value
+     */
+    public int getStatAsInt(String stat)
+    {
+        Object o = getStat(stat);
+        int i;
+        int defaultValue = 0;
+
+        if (o == null)
+        {
+            i = defaultValue;
+        }
+        else if (o instanceof Number)
+        {
+            i = ((Number) o).intValue();
+        }
+        else
+        {
+            String s = o.toString();
+
+            if (s == null || s.length() == 0)
+            {
+                i = defaultValue;
+            }
+            else
+            {
+                try
+                {
+                    i = Integer.parseInt(s);
+                }
+                catch (NumberFormatException nfe)
+                {
+                    i = defaultValue;
+                }
+            }
+        }
+        return i;
+    }
+
+    /**
      * Returns the map with the names of the statistics and their values.
      *
      * @return the map with the names of the statistics and their values.
@@ -99,7 +254,7 @@ public abstract class Statistics
         lock.lock();
         try
         {
-            stats = new HashMap<String,Object>(this.stats);
+            stats = new HashMap<>(this.stats);
         }
         finally
         {
@@ -153,6 +308,11 @@ public abstract class Statistics
      */
     protected void unlockedSetStat(String stat, Object value)
     {
+        if (value instanceof AtomicLong || value instanceof AtomicInteger)
+        {
+            logger.warn(
+                "Using an Atomic number as a stat, probably not what we want.");
+        }
         if (value == null)
             stats.remove(stat);
         else

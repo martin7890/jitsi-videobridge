@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,18 +15,10 @@
  */
 package org.jitsi.videobridge;
 
-import java.util.*;
-
-import net.java.sip.communicator.service.protocol.*;
-import net.java.sip.communicator.service.shutdown.*;
-import net.java.sip.communicator.util.*;
-
-import org.jitsi.service.neomedia.*;
+import org.jitsi.cmd.*;
+import org.jitsi.meet.*;
 import org.jitsi.videobridge.osgi.*;
 import org.jitsi.videobridge.xmpp.*;
-import org.jivesoftware.whack.*;
-import org.osgi.framework.*;
-import org.xmpp.component.*;
 
 /**
  * Provides the <tt>main</tt> entry point of the Jitsi Videobridge application
@@ -38,7 +30,7 @@ import org.xmpp.component.*;
  * is a comma-separated list of <tt>xmpp</tt> and <tt>rest</tt>. The default
  * value is <tt>xmpp</tt> (i.e. if the command-line argument <tt>--apis=</tt> is
  * not explicitly specified, the application behaves as if <tt>--args=xmpp</tt>
- * is specified). For example, specify <tt>--apis=rest,xmpp</tt> on the comamnd
+ * is specified). For example, specify <tt>--apis=rest,xmpp</tt> on the command
  * line to simultaneously enable the two APIs.
  * </p>
  *
@@ -50,26 +42,19 @@ public class Main
      * The name of the command-line argument which specifies the application
      * programming interfaces (APIs) to enable for Jitsi Videobridge.
      */
-    private static final String APIS_ARG_NAME = "--apis=";
+    private static final String APIS_ARG_NAME = "--apis";
 
     /**
      * The name of the command-line argument which specifies the XMPP domain
      * to use.
      */
-    private static final String DOMAIN_ARG_NAME = "--domain=";
-
-    /**
-     * The <tt>Object</tt> which synchronizes the access to the state related to
-     * the decision whether the application is to exit. At the time of this
-     * writing, the application just runs until it is killed.
-     */
-    private static final Object exitSyncRoot = new Object();
+    private static final String DOMAIN_ARG_NAME = "--domain";
 
     /**
      * The name of the command-line argument which specifies the IP address or
      * the name of the XMPP host to connect to.
      */
-    private static final String HOST_ARG_NAME = "--host=";
+    private static final String HOST_ARG_NAME = "--host";
 
     /**
      * The default value of the {@link #HOST_ARG_NAME} command-line argument if
@@ -78,42 +63,10 @@ public class Main
     private static final String HOST_ARG_VALUE = "localhost";
 
     /**
-     * The logger instance used.
-     */
-    private static Logger logger = Logger.getLogger(Main.class);
-
-    /**
-     * The name of the command-line argument which specifies the value of the
-     * <tt>System</tt> property
-     * {@link DefaultStreamConnector#MAX_PORT_NUMBER_PROPERTY_NAME}.
-     */
-    private static final String MAX_PORT_ARG_NAME = "--max-port=";
-
-    /**
-     * The default value of the {@link #MAX_PORT_ARG_NAME} command-line argument
-     * if it is not explicitly provided.
-     */
-    private static final String MAX_PORT_ARG_VALUE = "20000";
-
-    /**
-     * The name of the command-line argument which specifies the value of the
-     * <tt>System</tt> property
-     * {@link DefaultStreamConnector#MIN_PORT_NUMBER_PROPERTY_NAME}.
-     */
-    private static final String MIN_PORT_ARG_NAME = "--min-port=";
-
-    /**
-     * The default value of the {@link #MIN_PORT_ARG_NAME} command-line argument
-     * if
-     * it is not explicitly provided.
-     */
-    private static final String MIN_PORT_ARG_VALUE = "10000";
-
-    /**
      * The name of the command-line argument which specifies the port of the
      * XMPP host to connect on.
      */
-    private static final String PORT_ARG_NAME = "--port=";
+    private static final String PORT_ARG_NAME = "--port";
 
     /**
      * The default value of the {@link #PORT_ARG_NAME} command-line argument if
@@ -126,13 +79,13 @@ public class Main
      * the sub-domain of the Jabber component implemented by this application
      * with which it is to authenticate to the XMPP server to connect to.
      */
-    private static final String SECRET_ARG_NAME = "--secret=";
+    private static final String SECRET_ARG_NAME = "--secret";
 
     /**
      * The name of the command-line argument which specifies sub-domain name for
      * the videobridge component.
      */
-    private static final String SUBDOMAIN_ARG_NAME = "--subdomain=";
+    private static final String SUBDOMAIN_ARG_NAME = "--subdomain";
 
     /**
      * Represents the <tt>main</tt> entry point of the Jitsi Videobridge
@@ -145,213 +98,62 @@ public class Main
     public static void main(String[] args)
         throws Exception
     {
+        CmdLine cmdLine = new CmdLine();
+
+        cmdLine.parse(args);
+
         // Parse the command-line arguments.
-        List<String> apis = new LinkedList<String>();
-        String host = null;
-        String maxPort = MAX_PORT_ARG_VALUE;
-        String minPort = MIN_PORT_ARG_VALUE;
-        int port = PORT_ARG_VALUE;
-        String secret = "";
-        String domain = null;
-        String subdomain = ComponentImpl.SUBDOMAIN;
+        String apis
+            = cmdLine.getOptionValue(APIS_ARG_NAME, Videobridge.XMPP_API);
+        String domain = cmdLine.getOptionValue(DOMAIN_ARG_NAME, null);
+        int port = cmdLine.getIntOptionValue(PORT_ARG_NAME, PORT_ARG_VALUE);
+        String secret = cmdLine.getOptionValue(SECRET_ARG_NAME, "");
+        String subdomain
+            = cmdLine.getOptionValue(
+                    SUBDOMAIN_ARG_NAME, ComponentImpl.SUBDOMAIN);
 
-        for (String arg : args)
-        {
-            if (arg.startsWith(APIS_ARG_NAME))
-            {
-                for (String api
-                        : arg.substring(APIS_ARG_NAME.length()).split(","))
-                {
-                    if ((api != null)
-                            && (api.length() != 0)
-                            && !apis.contains(api))
-                    {
-                        apis.add(api);
-                    }
-                }
-            }
-            else if (arg.startsWith(DOMAIN_ARG_NAME))
-            {
-                domain = arg.substring(DOMAIN_ARG_NAME.length());
-            }
-            else if (arg.startsWith(HOST_ARG_NAME))
-            {
-                host = arg.substring(HOST_ARG_NAME.length());
-            }
-            else if (arg.startsWith(MAX_PORT_ARG_NAME))
-            {
-                maxPort = arg.substring(MAX_PORT_ARG_NAME.length());
-            }
-            else if (arg.startsWith(MIN_PORT_ARG_NAME))
-            {
-                minPort = arg.substring(MIN_PORT_ARG_NAME.length());
-            }
-            else if (arg.startsWith(PORT_ARG_NAME))
-            {
-                port = Integer.parseInt(arg.substring(PORT_ARG_NAME.length()));
-            }
-            else if (arg.startsWith(SECRET_ARG_NAME))
-            {
-                secret = arg.substring(SECRET_ARG_NAME.length());
-            }
-            else if (arg.startsWith(SUBDOMAIN_ARG_NAME))
-            {
-                subdomain = arg.substring(SUBDOMAIN_ARG_NAME.length());
-            }
-        }
+        String host
+            = cmdLine.getOptionValue(
+                    HOST_ARG_NAME,
+                    domain == null ? HOST_ARG_VALUE : domain);
 
-        if (apis.isEmpty())
-            apis.add(Videobridge.XMPP_API);
-        if (host == null)
-            host = (domain == null) ? HOST_ARG_VALUE : domain;
+        // Some of our dependencies bring in slf4j, which means Jetty will default to using
+        // slf4j as its logging backend.  The version of slf4j brought in, however, is too old
+        // for Jetty so it throws errors.  We use java.util.logging so tell Jetty to use that
+        // as its logging backend.
+        //TODO: Instead of setting this here, we should integrate it with the infra/debian scripts
+        // to be passed.
+        System.setProperty("org.eclipse.jetty.util.log.class", "org.eclipse.jetty.util.log.JavaUtilLog");
 
-        /*
-         * Before initializing the application programming interfaces (APIs) of
-         * Jitsi Videobridge, set any System properties which they use and which
-         * may be specified by the command-line arguments.
-         */
+        // Before initializing the application programming interfaces (APIs) of
+        // Jitsi Videobridge, set any System properties which they use and which
+        // may be specified by the command-line arguments.
         System.setProperty(
                 Videobridge.REST_API_PNAME,
                 Boolean.toString(apis.contains(Videobridge.REST_API)));
         System.setProperty(
                 Videobridge.XMPP_API_PNAME,
                 Boolean.toString(apis.contains(Videobridge.XMPP_API)));
-        if ((maxPort != null) && (maxPort.length() != 0))
-        {
-            // Jingle Raw UDP transport
-            System.setProperty(
-                    DefaultStreamConnector.MAX_PORT_NUMBER_PROPERTY_NAME,
-                    maxPort);
-            // Jingle ICE-UDP transport
-            System.setProperty(
-                    OperationSetBasicTelephony
-                        .MAX_MEDIA_PORT_NUMBER_PROPERTY_NAME,
-                    maxPort);
-        }
-        if ((minPort != null) && (minPort.length() != 0))
-        {
-            // Jingle Raw UDP transport
-            System.setProperty(
-                    DefaultStreamConnector.MIN_PORT_NUMBER_PROPERTY_NAME,
-                    minPort);
-            // Jingle ICE-UDP transport
-            System.setProperty(
-                    OperationSetBasicTelephony
-                        .MIN_MEDIA_PORT_NUMBER_PROPERTY_NAME,
-                    minPort);
-        }
 
-        /*
-         * Start OSGi. It will invoke the application programming interfaces
-         * (APIs) of Jitsi Videobridge. Each of them will keep the application
-         * alive. 
-         */
-        OSGi.start(
-                new BundleActivator()
-                {
-                    @Override
-                    public void start(BundleContext bundleContext)
-                        throws Exception
-                    {
-                        // TODO Auto-generated method stub
-                        registerShutdownService(
-                            bundleContext, Thread.currentThread(), this);
-                    }
-
-                    @Override
-                    public void stop(BundleContext bundleContext)
-                        throws Exception
-                    {
-                        // TODO Auto-generated method stub
-                    }
-                });
+        ComponentMain main = new ComponentMain();
+        BundleConfig osgiBundles = new BundleConfig();
 
         // Start Jitsi Videobridge as an external Jabber component.
         if (apis.contains(Videobridge.XMPP_API))
         {
-            ExternalComponentManager componentManager
-                = new ExternalComponentManager(host, port);
+            ComponentImpl component
+                = new ComponentImpl(
+                        host,
+                        port,
+                        domain,
+                        subdomain,
+                        secret);
 
-            componentManager.setMultipleAllowed(subdomain, true);
-            componentManager.setSecretKey(subdomain, secret);
-            if (domain != null)
-                componentManager.setServerName(domain);
-    
-            Component component = new ComponentImpl();
-
-            componentManager.addComponent(subdomain, component);
-
-            /*
-             * The application has nothing more to do but wait for ComponentImpl
-             * to perform its duties. Presently, there is no specific shutdown
-             * procedure and the application just gets killed.
-             */
-            do
-            {
-                synchronized (exitSyncRoot)
-                {
-                    try
-                    {
-                        exitSyncRoot.wait();
-                    }
-                    catch (InterruptedException ie)
-                    {
-                        break;
-                    }
-                }
-            }
-            while (true);
-
-            try
-            {
-                componentManager.removeComponent(subdomain);
-            }
-            catch (ComponentException e)
-            {
-                logger.error(e, e);
-            }
+            main.runMainProgramLoop(component, osgiBundles);
         }
-    }
-
-    /**
-     * Registers {@link ShutdownService} implementation for videobridge
-     * application.
-     * @param bundleContext the OSGi context
-     * @param mainThread main application thread
-     * @param mainBundleActivator main bundle activator that will be used for
-     *                            stopping the OSGi.
-     */
-    private static void registerShutdownService(
-            BundleContext bundleContext,
-            final Thread mainThread,
-            final BundleActivator mainBundleActivator)
-    {
-        bundleContext.registerService(
-            ShutdownService.class,
-            new ShutdownService()
-            {
-                private boolean shutdownStarted = false;
-
-                @Override
-                public void beginShutdown()
-                {
-                    if (shutdownStarted)
-                        return;
-
-                    shutdownStarted = true;
-
-                    new Thread(new Runnable()
-                    {
-                        @Override
-                        public void run()
-                        {
-                            mainThread.interrupt();
-
-                            OSGi.stop(mainBundleActivator);
-                        }
-                    }, "JVB-Shutdown-Thread").start();
-                }
-            }, null
-        );
+        else
+        {
+            main.runMainProgramLoop(osgiBundles);
+        }
     }
 }

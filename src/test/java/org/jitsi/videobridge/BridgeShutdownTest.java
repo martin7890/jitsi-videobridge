@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,21 +15,16 @@
  */
 package org.jitsi.videobridge;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.service.shutdown.*;
-import net.java.sip.communicator.util.*;
-
-import org.jitsi.service.neomedia.*;
-import org.jitsi.videobridge.osgi.*;
-
+import org.jitsi.meet.*;
+import org.jitsi.xmpp.extensions.colibri.*;
 import org.jivesoftware.smack.packet.*;
 import org.jivesoftware.smack.packet.IQ;
 import org.jivesoftware.smack.util.*;
 
 import org.junit.*;
 
-import org.osgi.framework.*;
-
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
 import org.xmlpull.v1.*;
 
 import java.io.*;
@@ -44,14 +39,11 @@ import static org.junit.Assert.*;
 public class BridgeShutdownTest
 {
     /**
-     * OSGi bundle context instance.
-     */
-    private static BundleContext bc;
-
-    /**
      * Tested <tt>Videobridge</tt> instance.
      */
     private static Videobridge bridge;
+
+    private static OSGiHandler osgiHandler = new OSGiHandler();
 
     /**
      * Initializes OSGi and the videobridge.
@@ -65,66 +57,18 @@ public class BridgeShutdownTest
             Videobridge.SHUTDOWN_ALLOWED_SOURCE_REGEXP_PNAME,
             "focus.*");
 
-        OSGi.start(
-            new BundleActivator()
-            {
-                @Override
-                public void start(BundleContext bundleContext)
-                    throws Exception
-                {
-                    BridgeShutdownTest.bc = bundleContext;
-                    synchronized (BridgeShutdownTest.class)
-                    {
-                        BridgeShutdownTest.class.notify();
-                    }
-                }
+        osgiHandler.start();
 
-                @Override
-                public void stop(BundleContext bundleContext)
-                    throws Exception
-                {
-
-                }
-            }
-        );
-
-        synchronized (FocusControlTest.class)
-        {
-            FocusControlTest.class.wait(5000);
-            if(bc == null)
-                throw new RuntimeException("Failed to start OSGI");
-        }
-
-        bridge = ServiceUtils.getService(bc, Videobridge.class);
+        bridge = osgiHandler.getService(Videobridge.class);
     }
 
-    /**
-     * Creates {@link ColibriConferenceIQ} with audio content and empty channel
-     * IQ. Conference ID is empty hence it can be used to created new conference
-     * on the bridge.
-     *
-     * @param focusJid conference focus owner.
-     *
-     * @return {@link ColibriConferenceIQ} with audio content and empty channel
-     *         IQ.
-     */
-    private ColibriConferenceIQ createConferenceIq(String focusJid)
+    @AfterClass
+    public static void tearDown()
+        throws InterruptedException
     {
-        ColibriConferenceIQ confIq = new ColibriConferenceIQ();
+        osgiHandler.stop();
 
-        confIq.setFrom(focusJid);
-
-        ColibriConferenceIQ.Content audioContent
-            = new ColibriConferenceIQ.Content(MediaType.AUDIO.toString());
-
-        ColibriConferenceIQ.Channel channel
-            = new ColibriConferenceIQ.Channel();
-
-        audioContent.addChannel(channel);
-
-        confIq.addContent(audioContent);
-
-        return confIq;
+        bridge = null;
     }
 
     /**
@@ -139,13 +83,14 @@ public class BridgeShutdownTest
             = new TestShutdownService();
 
         bridge.getBundleContext().registerService(
-            ShutdownService.class,
-            testShutdownService, null);
+                ShutdownService.class,
+                testShutdownService, null);
 
-        String focusJid = "focusJid";
+        Jid focusJid = JidCreate.from("focusJid");
 
         // Allocate one conference
-        ColibriConferenceIQ confIq = createConferenceIq(focusJid);
+        ColibriConferenceIQ confIq = ColibriUtilities
+                .createConferenceIq(focusJid);
         IQ respIq;
 
         respIq = bridge.handleColibriConferenceIQ(confIq);
@@ -157,18 +102,18 @@ public class BridgeShutdownTest
         confIq.setID(respConfIq.getID());
 
         // Start the shutdown
-        GracefulShutdownIQ shutdownIQ = new GracefulShutdownIQ();
+        ShutdownIQ shutdownIQ = ShutdownIQ.createGracefulShutdownIQ();
 
         shutdownIQ.setFrom(focusJid);
 
-        respIq = bridge.handleGracefulShutdownIQ(shutdownIQ);
+        respIq = bridge.handleShutdownIQ(shutdownIQ);
 
-        assertEquals(IQ.Type.RESULT, respIq.getType());
+        assertEquals(IQ.Type.result, respIq.getType());
         assertTrue(bridge.isShutdownInProgress());
 
         // Now send get conference state request
         respConfIq.setFrom(focusJid);
-        respConfIq.setType(IQ.Type.GET);
+        respConfIq.setType(IQ.Type.get);
         respIq = bridge.handleColibriConferenceIQ(respConfIq);
 
         assertTrue(respIq instanceof ColibriConferenceIQ);
@@ -178,7 +123,8 @@ public class BridgeShutdownTest
         assertTrue(respConfIq.isGracefulShutdown());
 
         // Now send create new conference request and we expect error
-        ColibriConferenceIQ createNewConfIq = createConferenceIq(focusJid);
+        ColibriConferenceIQ createNewConfIq
+                = ColibriUtilities.createConferenceIq(focusJid);
 
         respIq = bridge.handleColibriConferenceIQ(createNewConfIq);
 
@@ -202,12 +148,16 @@ public class BridgeShutdownTest
         }
 
         respConfIq.setFrom(focusJid);
-        respConfIq.setType(IQ.Type.SET);
+        respConfIq.setType(IQ.Type.set);
 
-        respIq = bridge.handleColibriConferenceIQ(respConfIq);
+        bridge.handleColibriConferenceIQ(respConfIq);
 
-        // Channels should be expired
-        assertEquals(0, bridge.getChannelCount());
+        // There could be some channels due to health checks running
+        // periodically, but they should be expired rather quickly.
+        Util.waitForEquals(
+            "Channels should be expired",
+            0,
+            () -> bridge.getChannelCount());
 
         if (bridge.getConferenceCount() > 0)
         {
@@ -219,8 +169,10 @@ public class BridgeShutdownTest
             }
         }
 
-        // The bridge should trigger a shutdown after last conference is expired
-        assertTrue(testShutdownService.shutdownStarted);
+        assertTrue(
+            "The bridge should trigger a shutdown after last conference is "
+                + "expired",
+            testShutdownService.shutdownStarted);
     }
 
     private void validateErrorResponse(IQ respIqRaw)
@@ -233,18 +185,20 @@ public class BridgeShutdownTest
 
         XmlPullParser parser = factory.newPullParser();
 
-        String iqStr = respIqRaw.toXML();
+        String iqStr = respIqRaw.toXML().toString();
 
         parser.setInput(new StringReader(iqStr));
 
         parser.next();
 
-        IQ respIq = PacketParserUtils.parseIQ(parser, null);
+        IQ respIq = PacketParserUtils.parseIQ(parser);
 
-        assertEquals(IQ.Type.ERROR, respIq.getType());
+        assertEquals(IQ.Type.error, respIq.getType());
 
         XMPPError error = respIq.getError();
         assertNotNull(error);
+        assertEquals(XMPPError.Condition.service_unavailable,
+                error.getCondition());
         assertEquals(XMPPError.Type.CANCEL, error.getType());
 
         assertNotNull(
@@ -253,8 +207,7 @@ public class BridgeShutdownTest
                 ColibriConferenceIQ.GracefulShutdown.NAMESPACE));
     }
 
-    class TestShutdownService
-        implements ShutdownService
+    class TestShutdownService implements ShutdownService
     {
         boolean shutdownStarted = false;
 

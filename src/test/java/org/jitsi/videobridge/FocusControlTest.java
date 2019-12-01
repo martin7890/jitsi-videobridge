@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2015 - Present, 8x8 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,16 @@
  */
 package org.jitsi.videobridge;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.util.*;
-
-import org.jitsi.videobridge.osgi.*;
+import org.jitsi.utils.logging2.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.health.*;
 import org.jivesoftware.smack.packet.*;
 import org.junit.*;
 import org.junit.Test;
 import org.junit.runner.*;
 import org.junit.runners.*;
-import org.osgi.framework.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
 
 import static org.junit.Assert.*;
 
@@ -39,19 +39,14 @@ public class FocusControlTest
 {
 
     /**
-     * OSGi bundle context instance.
-     */
-    private static BundleContext bc;
-
-    /**
      * Tested <tt>Videobridge</tt> instance.
      */
     private static Videobridge bridge;
 
-    /**
-     * Bundle activator used to start OSGi(stored for shutdown purpose)
-     */
-    private static BundleActivator activator;
+    private static OSGiHandler osgiHandler = new OSGiHandler();
+
+    private static Logger logger
+            = new LoggerImpl(FocusControlTest.class.getName());
 
     /**
      * Initializes OSGi and the videobridge.
@@ -60,38 +55,9 @@ public class FocusControlTest
     public static void setUp()
         throws InterruptedException
     {
-        activator =
-            new BundleActivator()
-            {
-                @Override
-                public void start(BundleContext bundleContext)
-                    throws Exception
-                {
-                    FocusControlTest.bc = bundleContext;
-                    synchronized (FocusControlTest.class)
-                    {
-                        FocusControlTest.class.notify();
-                    }
-                }
+        osgiHandler.start();
 
-                @Override
-                public void stop(BundleContext bundleContext)
-                    throws Exception
-                {
-
-                }
-            };
-
-        OSGi.start(activator);
-
-        synchronized (FocusControlTest.class)
-        {
-            FocusControlTest.class.wait(5000);
-            if(bc == null)
-                throw new RuntimeException("Failed to start OSGI");
-        }
-
-        bridge = ServiceUtils.getService(bc, Videobridge.class);
+        bridge = osgiHandler.getService(Videobridge.class);
     }
 
     /**
@@ -99,8 +65,49 @@ public class FocusControlTest
      */
     @AfterClass
     public static void tearDown()
+        throws InterruptedException
     {
-        OSGi.stop(activator);
+        osgiHandler.stop();
+    }
+
+    private static void expectResult(
+            ColibriConferenceIQ confIq,
+            int processingOptions)
+        throws Exception
+    {
+        IQ respIq = bridge.handleColibriConferenceIQ(confIq, processingOptions);
+
+        assertEquals(IQ.Type.result, respIq.getType());
+        assertTrue(respIq instanceof ColibriConferenceIQ);
+    }
+
+    private static void expectNotAuthorized(ColibriConferenceIQ confIq,
+                                            int processingOptions)
+        throws Exception
+    {
+        IQ respIq = bridge.handleColibriConferenceIQ(confIq, processingOptions);
+
+        logger.info(respIq.toXML());
+
+        assertNotNull(respIq);
+        assertEquals(IQ.Type.error, respIq.getType());
+        assertEquals(
+            XMPPError.Condition.not_authorized,
+            respIq.getError().getCondition());
+    }
+
+    private static void expectNotAuthorized(HealthCheckIQ healthIq)
+        throws Exception
+    {
+        IQ respIq = bridge.handleHealthCheckIQ(healthIq);
+
+        logger.info(respIq.toXML());
+
+        assertNotNull(respIq);
+        assertEquals(IQ.Type.error, respIq.getType());
+        assertEquals(
+            XMPPError.Condition.not_authorized,
+            respIq.getError().getCondition());
     }
 
     /**
@@ -111,13 +118,12 @@ public class FocusControlTest
     public void focusControlTest()
         throws Exception
     {
-        String focusJid = "focusJid";
+        Jid focusJid = JidCreate.from("focusJid");
+        int options = 0;
 
         ColibriConferenceIQ confIq
             = ColibriUtilities.createConferenceIq(focusJid);
-        IQ respIq;
-
-        respIq = bridge.handleColibriConferenceIQ(confIq);
+        IQ respIq = bridge.handleColibriConferenceIQ(confIq);
 
         assertTrue(respIq instanceof ColibriConferenceIQ);
 
@@ -126,19 +132,25 @@ public class FocusControlTest
         confIq.setID(respConfIq.getID());
 
         // Only focus can access this conference now
-        confIq.setFrom("someOtherJid");
+        confIq.setFrom(JidCreate.from("someOtherJid"));
         respIq = bridge.handleColibriConferenceIQ(confIq);
-        assertNull(respIq);
+        assertNotNull(respIq);
+        XMPPError error = respIq.getError();
+        //TODO(brian): this test fails, because we no longer hit the access control in Videobridge#getConference which
+        // would set the error (we instead get the conference from the ColibriShim.ConferenceShim which stores a reference
+        // directly.  fix that one way or another.
+        assertNotNull(error);
+        // Should be 'not-allowed', but not easy to distinguish between
+        // "conference not found"and "invalid focus" errors in the Videobridge
+        // class without more refactoring
+        assertEquals(
+            XMPPError.Condition.bad_request, error.getCondition());
 
         // Expect 'not_authorized' error when no focus is provided
         // with default options
-        confIq.setFrom(null);
-        IQ notAuthorizedError = bridge.handleColibriConferenceIQ(confIq);
+        confIq.setFrom((Jid)null);
 
-        assertNotNull(notAuthorizedError);
-        assertEquals(IQ.Type.ERROR, notAuthorizedError.getType());
-        assertEquals(XMPPError.Condition.not_authorized.toString(),
-                     notAuthorizedError.getError().getCondition());
+        expectNotAuthorized(confIq, options);
     }
 
     /**
@@ -151,17 +163,15 @@ public class FocusControlTest
     {
         ColibriConferenceIQ confIq = ColibriUtilities.createConferenceIq(null);
         int options = Videobridge.OPTION_ALLOW_NO_FOCUS;
-        IQ respIq;
-        ColibriConferenceIQ respConfIq;
 
-        respIq = bridge.handleColibriConferenceIQ(confIq, options);
+        IQ respIq = bridge.handleColibriConferenceIQ(confIq, options);
         assertTrue(respIq instanceof ColibriConferenceIQ);
 
-        respConfIq = (ColibriConferenceIQ) respIq;
+        ColibriConferenceIQ respConfIq = (ColibriConferenceIQ) respIq;
 
         confIq.setID(respConfIq.getID());
 
-        confIq.setFrom("someJid");
+        confIq.setFrom(JidCreate.from("someJid"));
         respIq = bridge.handleColibriConferenceIQ(confIq, options);
         assertNotNull(respIq);
     }
@@ -174,33 +184,78 @@ public class FocusControlTest
     public void anyFocusControlTest()
         throws Exception
     {
-        String focusJid = "focusJid";
+        Jid focusJid = JidCreate.from("focusJid");
 
         ColibriConferenceIQ confIq
             = ColibriUtilities.createConferenceIq(focusJid);
         int options = Videobridge.OPTION_ALLOW_ANY_FOCUS;
-        IQ respIq;
-        ColibriConferenceIQ respConfIq;
 
-        respIq = bridge.handleColibriConferenceIQ(confIq, options);
+        IQ respIq = bridge.handleColibriConferenceIQ(confIq, options);
 
         assertTrue(respIq instanceof ColibriConferenceIQ);
 
-        respConfIq = (ColibriConferenceIQ) respIq;
+        ColibriConferenceIQ respConfIq = (ColibriConferenceIQ) respIq;
 
         // Set conference id
         confIq.setID(respConfIq.getID());
 
         // Anyone can access the conference
-        confIq.setFrom("someOtherJid");
+        confIq.setFrom(JidCreate.from("someOtherJid"));
         assertNotNull(bridge.handleColibriConferenceIQ(confIq, options));
-        confIq.setFrom(null);
+        confIq.setFrom((Jid)null);
         assertNotNull(bridge.handleColibriConferenceIQ(confIq, options));
 
         options = Videobridge.OPTION_ALLOW_NO_FOCUS;
-        confIq.setFrom(null);
+        confIq.setFrom((Jid)null);
         assertNotNull(bridge.handleColibriConferenceIQ(confIq, options));
-        confIq.setFrom("focus3");
+        confIq.setFrom(JidCreate.from("focus3"));
         assertNotNull(bridge.handleColibriConferenceIQ(confIq, options));
+    }
+
+    @Test
+    public void authorizedSourceTest()
+        throws Exception
+    {
+        String authorizedRegExpr = "^focus@auth.domain.com/.*$";
+        bridge.setAuthorizedSourceRegExp(authorizedRegExpr);
+
+        // Make sure we run with no extra options to avoid test failures if
+        // we have defaults specified in the system
+        int processingOptions = 0;
+
+        expectResult(
+            ColibriUtilities.createConferenceIq(
+                JidCreate.from("focus@auth.domain.com/focus8969386508643465")),
+            processingOptions);
+
+        expectResult(
+            ColibriUtilities.createConferenceIq(
+                    JidCreate.from("focus@auth.domain.com/fdsfwetg")),
+            processingOptions);
+
+        expectNotAuthorized(
+            ColibriUtilities.createConferenceIq(
+                    JidCreate.from("focus@auth2.domain.com/res1")),
+            processingOptions);
+
+        expectNotAuthorized(
+            ColibriUtilities.createConferenceIq(
+                    JidCreate.from("fdfsgv1@auth.domain23.com/pc3")),
+            processingOptions);
+
+        // Check for HealthCheckIQ
+        HealthCheckIQ healthCheckIQ = new HealthCheckIQ();
+
+        healthCheckIQ.setFrom(JidCreate.from("focus@auth.domain.com/fdsfwetg"));
+
+        // The bridge returns an error until the first health check completes,
+        // and it runs in a separate thread. So give it a few seconds
+        Util.waitForEquals(
+            "Health check should be successful",
+            IQ.Type.result,
+            () -> bridge.handleHealthCheckIQ(healthCheckIQ).getType());
+
+        healthCheckIQ.setFrom(JidCreate.from("focus@auth.domain4.com/fdsfwetg"));
+        expectNotAuthorized(healthCheckIQ);
     }
 }

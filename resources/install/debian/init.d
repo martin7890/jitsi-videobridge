@@ -24,24 +24,29 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 DAEMON=/usr/share/jitsi-videobridge/jvb.sh
 NAME=jvb
 USER=jvb
+# A tmpfs backed directory just for the JVB process. This is introduced
+# to hold packet arrival times, but it may be otherwise useful in the future.
+TMPPATH=/var/run/jitsi-videobridge
 PIDFILE=/var/run/jitsi-videobridge.pid
 LOGFILE=/var/log/jitsi/jvb.log
 DESC=jitsi-videobridge
+
+if [ ! -d "$TMPPATH" ]; then
+    mkdir "$TMPPATH"
+    chown $USER:adm "$TMPPATH"
+fi
+
 if [ ! $JVB_HOST ]; then
     JVB_HOST=localhost
 fi
 DAEMON_OPTS=" --host=$JVB_HOST --domain=$JVB_HOSTNAME --port=$JVB_PORT --secret=$JVB_SECRET $JVB_OPTS"
 
-test -x $DAEMON || exit 0
+if [ ! -x $DAEMON ] ;then
+  echo "Daemon not executable: $DAEMON"
+  exit 1
+fi
 
 set -e
-
-killParentPid() {
-    PARENT_PID=$(ps -o pid --no-headers --ppid $1 || true)
-    if [ $PARENT_PID ]; then
-        kill $PARENT_PID
-    fi
-}
 
 stop() {
     if [ -f $PIDFILE ]; then
@@ -49,11 +54,7 @@ stop() {
     fi
     echo -n "Stopping $DESC: "
     if [ $PID ]; then
-        killParentPid $PID
-        rm $PIDFILE || true
-        echo "$NAME stopped."
-    elif [ $(ps -C jvb.sh --no-headers -o pid) ]; then
-        kill $(ps -o pid --no-headers --ppid $(ps -C jvb.sh --no-headers -o pid))
+        kill $PID || true
         rm $PIDFILE || true
         echo "$NAME stopped."
     else
@@ -67,7 +68,7 @@ start() {
         exit 1
     fi
     echo -n "Starting $DESC: "
-    DAEMON_START_CMD="exec $DAEMON $DAEMON_OPTS < /dev/null >> $LOGFILE 2>&1"
+    DAEMON_START_CMD="JAVA_SYS_PROPS=\"$JAVA_SYS_PROPS\" exec $DAEMON $DAEMON_OPTS < /dev/null >> $LOGFILE 2>&1"
     AUTHBIND_CMD=""
     if [ "$AUTHBIND" = "yes" ]; then
         AUTHBIND_CMD="/usr/bin/authbind --deep /bin/bash -c "
@@ -83,7 +84,7 @@ reload() {
 }
 
 status() {
-    status_of_proc -p $PIDFILE "$DAEMON" "$NAME" && exit 0 || exit $?
+    status_of_proc -p $PIDFILE java "$NAME" && exit 0 || exit $?
 }
 
 case "$1" in
